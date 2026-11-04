@@ -256,6 +256,12 @@ button.chip:active { transform: scale(.97); }
 
 @media (max-width: 400px) { .tabs button { font-size: 11px; } }
 
+.hoje { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.btn.sair { color: #fff; background: #C0392B; border-color: #C0392B; font-weight: 600; padding: 4px 10px; min-height: 0; font-size: 12px; text-transform: none; letter-spacing: 0; }
+.paper .bar.obs { margin-top: 6px; }
+.synctxt { white-space: nowrap; }
+.btn.sair { white-space: nowrap; padding: 5px 16px; }
+
 </style>
 <div class="wrap">
   <header class="top">
@@ -545,23 +551,30 @@ function montar(rel, conta, ctx) {
     }
   }
   const tabelas = membros.map(m => ({ nome: m.nome, datas: m.datas.map(d => ({ d, dia: DIAS[wd(d)], sc: m.sc.has(d) })) }));
-  const resumoAnterior = recon && rel.mostrarResumo && recon.net < 0 && rel.decisao === 'descontar' ? recon : null;
+  const custom = (rel.textoResumo || '').trim();
+  const resumoAnterior = recon && rel.mostrarResumo && ((recon.net < 0 && rel.decisao === 'descontar') || custom) ? recon : null;
   return {
-    conta, rel, ciclo, preco, pres, tabelas, itens, linhas, total, recon, resumoAnterior, notas, pendenteDecisao, saldoApos,
+    conta, rel, ciclo, preco, pres, tabelas, itens, linhas, total, recon, resumoAnterior, obs: (rel.observacao || '').trim(), notas, pendenteDecisao, saldoApos,
     arquivo: nomeArquivo(conta, rel.ini), periodoTxt: `${br(rel.ini)} – ${br(rel.fim)}`,
     layout: membros.length > 1 ? 'pair' : 'single',
     rotulo: membros.length > 1 ? '' : `${conta.rotulo || 'Aluno'}: ${conta.nome}`
   };
 }
-function linhasResumoAnterior(rd) {
-  const r = rd.resumoAnterior; if (!r) return [];
+function resumoPadrao(rd) {
+  const r = rd.recon; if (!r || !(r.net < 0 && rd.rel.decisao === 'descontar')) return '';
   const multi = rd.conta.membros.length > 1;
   const lst = arr => arr.map(x => (multi ? x.m.split(' ')[0] + ' ' : '') + brShort(x.d)).join(', ');
   const n = -r.net, partes = [];
   if (r.faltas.length) partes.push(`${r.faltas.length} aula${r.faltas.length > 1 ? 's' : ''} paga${r.faltas.length > 1 ? 's' : ''} e não realizada${r.faltas.length > 1 ? 's' : ''} no ciclo anterior (${lst(r.faltas)})`);
   if (r.saldoAnt < 0) partes.push(`${-r.saldoAnt} aula${r.saldoAnt < -1 ? 's' : ''} a repor de ciclos anteriores`);
   if (r.extras.length) partes.push(`abatendo ${r.extras.length} aula${r.extras.length > 1 ? 's' : ''} extra${r.extras.length > 1 ? 's' : ''} (${lst(r.extras)})`);
-  return [{ t: `Desconto de ${n} aula${n > 1 ? 's' : ''}: ${partes.join('; ')}.` }];
+  return `Desconto de ${n} aula${n > 1 ? 's' : ''}: ${partes.join('; ')}.`;
+}
+function linhasResumoAnterior(rd) {
+  if (!rd.resumoAnterior) return [];
+  const custom = (rd.rel.textoResumo || '').trim();
+  if (custom) return custom.split(/\n+/).map(t => t.trim()).filter(Boolean).map(t => ({ t }));
+  const p = resumoPadrao(rd); return p ? [{ t: p }] : [];
 }
 function textoWhats(rd, cfg) {
   const L = [];
@@ -576,6 +589,7 @@ function textoWhats(rd, cfg) {
   L.push(`*Total: ${fmt(rd.total)}*`);
   for (const n of rd.notas) L.push(n);
   const ant = linhasResumoAnterior(rd); if (ant.length) { L.push(''); ant.forEach(x => L.push(x.t)); }
+  if (rd.obs) L.push('', `Observação: ${rd.obs}`);
   L.push('', `Pix (CNPJ): ${cfg.pix}`, cfg.assinatura);
   return L.join('\n');
 }
@@ -631,12 +645,13 @@ function velocityMes(ym, semanas, doc) {
   }).sort((a, b) => a.d.localeCompare(b.d) || horaNum(a.hora) - horaNum(b.hora));
   const semN = sessoes.filter(s => s.n == null).length;
   const total = sessoes.reduce((t, s) => t + (s.valor || 0), 0);
-  return { ym, ini, fim, sessoes, semN, total, periodoTxt: `${br(ini)} – ${br(fim)}`, arquivo: `Relatorio_Velocity_${String(mes).padStart(2, '0')}${ano}.pdf`, removidas: [...rem] };
+  return { ym, ini, fim, sessoes, semN, total, obs: ((doc && doc.obs) || '').trim(), periodoTxt: `${br(ini)} – ${br(fim)}`, arquivo: `Relatorio_Velocity_${String(mes).padStart(2, '0')}${ano}.pdf`, removidas: [...rem] };
 }
 function textoVelocity(v) {
   const L = [`*Relatório de aulas — Velocity*`, `Período: ${v.periodoTxt}`, ''];
   for (const s of v.sessoes) L.push(`${brShort(s.d)} ${s.dia.split('-')[0]} ${s.hora} · ${s.n == null ? 'nº de alunos?' : s.n + ' alunos'} · ${s.valor == null ? '—' : fmt(s.valor)}`);
   L.push('', `*Total: ${fmt(v.total)}* (${v.sessoes.length} sessões)`);
+  if (v.obs) L.push('', `Observação: ${v.obs}`);
   return L.join('\n');
 }
 
@@ -1102,8 +1117,8 @@ function vAlunos() {
   <h2>Geral</h2><div class="card pad"><div class="field"><label class="lbl" for="cfgIgn">Nomes a ignorar na agenda (separados por vírgula)</label><input id="cfgIgn" value="${esc((g.ignorar || []).join(', '))}"></div>
   <div class="field"><label class="lbl" for="cfgPix">Chave Pix (CNPJ)</label><input id="cfgPix" inputmode="numeric" value="${esc(g.pix)}"></div>
   <div class="field"><label class="lbl" for="cfgAss">Assinatura do relatório</label><input id="cfgAss" value="${esc(g.assinatura)}"></div>
-  <div class="field" style="margin-top:14px"><span class="lbl">Bloqueio com Face ID / digital (só neste aparelho)</span><div class="btns"><button class="btn" data-act="lockToggle">${Lock.ativo() ? 'Desativar bloqueio' : 'Ativar bloqueio com Face ID'}</button></div><small>${Lock.ativo() ? 'Ativo: o app pede Face ID ao abrir e ao voltar depois de 30 segundos fora dele.' : 'Ao ativar, o app pede Face ID (ou digital) ao abrir. Cada aparelho tem a sua própria escolha.'}</small></div>
-  <div class="btns" style="margin-top:12px"><button class="btn" data-act="salvarCfg">Salvar geral</button> <button class="btn" data-act="sair">Sair da conta</button></div></div>`;
+  <div class="field" style="margin-top:14px"><span class="lbl">Bloqueio com Face ID / digital (só neste aparelho)</span><div class="btns"><button class="btn" data-act="lockToggle">${Lock.ativo() ? 'Desativar bloqueio' : 'Ativar bloqueio com Face ID'}</button></div>${Lock.ativo() ? `<span class="lbl" style="margin-top:10px">Pedir de novo quando eu voltar ao app</span><div class="btns"><button class="btn sm ${Lock.espera() === 0 ? 'pri' : ''}" data-act="lockEsp" data-v="0">Sempre que sair</button><button class="btn sm ${Lock.espera() === 30 ? 'pri' : ''}" data-act="lockEsp" data-v="30">Após 30 s</button><button class="btn sm ${Lock.espera() === 300 ? 'pri' : ''}" data-act="lockEsp" data-v="300">Após 5 min</button></div>` : ''}<small>${Lock.ativo() ? 'Ativo neste aparelho. “Sempre que sair” também esconde o conteúdo na tela de apps abertos do iPhone.' : 'Ao ativar, o app pede Face ID (ou digital) ao abrir. Cada aparelho tem a sua própria escolha.'}</small></div>
+  <div class="btns" style="margin-top:12px"><button class="btn" data-act="salvarCfg">Salvar geral</button></div></div>`;
 }
 function novaConta() { return { id: '', nome: '', arquivo: '', rotulo: 'Aluno', ordem: S.contas.length + 1, estilo: 1, ciclo: '20-19', preco: 150, precoBaixo: 200, limite: 0.75, limiteInclusivo: true, taxa: 0, taxaDesc: 'Taxa de academia (mensal)', saldoInicial: 0, ativo: true, membros: [{ nome: '', apelidos: [], dias: [] }] }; }
 function lerSheet() {
@@ -1224,6 +1239,9 @@ function vRel() {
     <div class="grid2" style="margin-top:6px"><input id="ajDesc" placeholder="Descrição" aria-label="Descrição do ajuste"><input id="ajVal" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)" aria-label="Valor do ajuste"></div>
     <div class="btns" style="margin-top:8px"><button class="btn sm" data-act="addAjuste">Adicionar ajuste</button></div></div></div>`;
 
+  // observação
+  h += `<h2>Observação</h2><div class="card pad"><label class="lbl" for="obsRel">Comentário extra que aparece no relatório (opcional)</label><textarea id="obsRel" rows="3" placeholder="Ex.: Feriado de 15/11 sem aula; reposição combinada para 22/11." aria-label="Observação do relatório">${esc(rel.observacao || '')}</textarea></div>`;
+
   // conferência
   if (rd.recon) {
     const r = rd.recon, preco = rd.preco, multi = conta.membros.length > 1;
@@ -1243,7 +1261,11 @@ function vRel() {
       <p style="margin:0"><b>Diferença: <span class="num">${r.net > 0 ? '+' : ''}${r.net}</span> aula(s)</b>${r.net > 0 ? ` · cobrança adicional de ${fmt(r.net * preco)} entra neste relatório` : r.net < 0 ? ' · aulas a repor' : ' · sem saldo'}</p>
       ${r.net < 0 ? (rel.decisao ? `<div class="note">${rel.decisao === 'descontar' ? `Desconto de ${fmt(-r.net * preco)} aplicado neste relatório.` : `Segue como “Pendente de reposição: ${-r.net} aula(s)” no rodapé.`} <button class="btn sm" data-act="decisao" data-v="">Trocar</button></div>` :
       `<div class="note bad"><b>${-r.net} aula(s) a repor.</b> O que fazer com isso?<div class="btns" style="margin-top:8px"><button class="btn pri" data-act="decisao" data-v="descontar">Tirar ${fmt(-r.net * preco)} deste relatório</button><button class="btn" data-act="decisao" data-v="informar">Só avisar que há ${-r.net} a repor</button></div></div>`) : ''}
-      <label class="sw"><input type="checkbox" id="chkResumo" ${rel.mostrarResumo ? 'checked' : ''}> Explicar no PDF o motivo do desconto</label></div>`;
+      <label class="sw"><input type="checkbox" id="chkResumo" ${rel.mostrarResumo ? 'checked' : ''}> Mostrar o texto da conferência no PDF</label>
+      <div><span class="lbl">Texto da conferência no PDF</span>
+        <p class="muted" style="margin:0 0 6px;font-size:13px">${rd.resumoAnterior ? '' : ''}${resumoPadrao(rd) ? `Texto padrão: <i>${esc(resumoPadrao(rd))}</i>` : 'Hoje o padrão não escreve nada aqui (só entra texto quando há desconto). Se você escrever abaixo, o seu texto aparece no PDF.'}</p>
+        <textarea id="txtResumo" rows="3" placeholder="${esc(resumoPadrao(rd) || 'Escreva o que quer que apareça sobre o ciclo anterior')}" aria-label="Texto personalizado da conferência">${esc(rel.textoResumo || '')}</textarea>
+        <div class="btns" style="margin-top:6px">${(rel.textoResumo || '').trim() ? '<button class="btn sm" data-act="resumoPadrao">Voltar ao texto padrão</button>' : '<small>Deixe vazio para usar o padrão.</small>'}</div></div></div>`;
   }
 
   // prévia e ações
@@ -1273,7 +1295,8 @@ function previaHTML(rd) {
     h += `<div class="alu">${esc(rd.rotulo)}</div>${tabela(rd.tabelas[0])}` + rd.linhas.map(l => `<div class="bar">${segsHTML(l)}</div>`).join('');
   }
   h += `<div class="bar tot">TOTAL GERAL: ${fmt(rd.total)}</div>${rd.notas.map(n => `<div class="bar nota">${esc(n)}</div>`).join('')}`;
-  if (ant.length) h += `<div class="ant"><b>${esc(ant[0].t)}</b>${ant.slice(1).map(x => `<div class="${x.cor || ''}">${x.b && !x.cor ? '<b>' + esc(x.t) + '</b>' : esc(x.t)}</div>`).join('')}</div>`;
+  if (ant.length) h += `<div class="ant">${ant.map(x => `<div style="white-space:pre-wrap">${esc(x.t)}</div>`).join('')}</div>`;
+  if (rd.obs) h += `<div class="bar obs" style="white-space:pre-wrap"><b>Observação:</b> ${esc(rd.obs)}</div>`;
   h += `<div class="foot">Pagamento via PIX<br><b>Chave CNPJ: ${esc(S.config.pix)}</b><br>${esc(S.config.assinatura)}</div></div>`;
   return h;
 }
@@ -1283,6 +1306,14 @@ function previaHTML(rd) {
 const COR = { orange: [232, 160, 32], dark: [26, 26, 26], light: [253, 243, 227], white: [255, 255, 255], grid: [224, 224, 224], gray: [204, 204, 204], red: [192, 57, 43], note: [178, 106, 0] };
 function pdfSegs(doc, list, x, y, size, cor) { let cx = x; for (const s of list) { doc.setFont('helvetica', s.b ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(...(cor || COR.dark)); doc.text(s.t, cx, y); cx += doc.getTextWidth(s.t) + (/\s$/.test(s.t) ? size * 0.28 : 0); } }
 function pdfFit(doc, txt, x, y, maxW, size, bold, align) { doc.setFont('helvetica', bold ? 'bold' : 'normal'); let s = size; doc.setFontSize(s); while (doc.getTextWidth(txt) > maxW && s > 5.5) { s -= .5; doc.setFontSize(s); } doc.text(txt, x, y, align ? { align } : undefined); }
+function obsAltura(doc, obs, cw, size, k) { if (!obs) return 0; doc.setFont('helvetica', 'normal'); doc.setFontSize(size); return doc.splitTextToSize('Observação: ' + obs, cw - 24).length * (size + 3.5) + 16 * k + 4; }
+function pdfObs(doc, obs, x, y, cw, size, k) {
+  if (!obs) return y; doc.setFont('helvetica', 'normal'); doc.setFontSize(size);
+  const ln = doc.splitTextToSize('Observação: ' + obs, cw - 24), h = ln.length * (size + 3.5) + 12 * k;
+  y += 4 * k; doc.setFillColor(...COR.light); doc.rect(x, y, cw, h, 'F'); doc.setTextColor(...COR.dark);
+  ln.forEach((t, i) => { if (i === 0) { doc.setFont('helvetica', 'bold'); doc.text('Observação:', x + 12, y + 6 * k + size); const w = doc.getTextWidth('Observação: '); doc.setFont('helvetica', 'normal'); doc.text(t.replace(/^Observação:\s*/, ''), x + 12 + w, y + 6 * k + size); } else doc.text(t, x + 12, y + 6 * k + size + i * (size + 3.5)); });
+  return y + h;
+}
 function pdfAnterior(doc, rd, x, y, size, k) {
   const ant = linhasResumoAnterior(rd); if (!ant.length) return y;
   y += 10 * k;
@@ -1318,6 +1349,7 @@ function pdfSingle(doc, rd, cfg, k) {
   y += -2 * k; { const h = 27 * k; barra(h, COR.orange); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...COR.white); doc.text('TOTAL GERAL: ' + fmt(rd.total), mx + 12, y + h / 2 + 4); y += h; }
   for (const n of rd.notas) { y += 4 * k; const h = 26 * k; barra(h, COR.light); doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...COR.dark); doc.text(n, mx + 12, y + h / 2 + 3.5); y += h; }
   ensure(60); y = pdfAnterior(doc, rd, mx, y, 8.5, k);
+  { const oh = obsAltura(doc, rd.obs, cw, 9.5, k); if (oh) { ensure(oh + 8); y = pdfObs(doc, rd.obs, mx, y, cw, 9.5, k); } }
   y += 42.5 * k; ensure(60); pdfRodape(doc, cfg, W, y, 9);
 }
 function pdfPair(doc, rd, cfg, k) {
@@ -1354,6 +1386,7 @@ function pdfPair(doc, rd, cfg, k) {
   y += 4.3 * k; { const h = 24 * k; ensure(h); doc.setFillColor(...COR.orange); doc.rect(mx, y, cw, h, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...COR.white); doc.text('TOTAL GERAL: ' + fmt(rd.total), mx + 10, y + h / 2 + 3.5); y += h; }
   for (const n of rd.notas) { y += 4 * k; const h = 22 * k; ensure(h); doc.setFillColor(...COR.light); doc.rect(mx, y, cw, h, 'F'); doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(...COR.dark); doc.text(n, mx + 10, y + h / 2 + 3); y += h; }
   ensure(50); y = pdfAnterior(doc, rd, mx, y, 8, k);
+  { const oh = obsAltura(doc, rd.obs, cw, 9, k); if (oh) { ensure(oh + 8); y = pdfObs(doc, rd.obs, mx, y, cw, 9, k); } }
   y += 14 * k; ensure(50); pdfRodape(doc, cfg, W, y, 8);
 }
 function gerarPDF(rd, cfg) {
@@ -1489,6 +1522,7 @@ document.addEventListener('click', async ev => {
         await Store.set('contas', c.id, c); S.contas = [...S.contas.filter(x => x.id !== c.id), c].sort((x, y) => (x.ordem || 0) - (y.ordem || 0)); fecharSheet(); render(true); await reprocessarSemanas(); toast('Aluno salvo'); break;
       }
       case 'sheetExcluir': { if (S.confirma === 'conta') { const id = S.sheet.conta.id; fecharSheet(); await Store.del('contas', id); toast('Aluno excluído'); } else { S.confirma = 'conta'; renderSheet(); } break; }
+      case 'lockEsp': Lock.setEspera(+d.v); toast(+d.v === 0 ? 'Vai pedir sempre que você sair do app' : `Vai pedir após ${+d.v === 30 ? '30 segundos' : '5 minutos'} fora do app`); render(); break;
       case 'lockToggle': {
         try { if (Lock.ativo()) { await Lock.verificar(); Lock.desativar(); toast('Bloqueio desativado'); } else { await Lock.ativar(); toast('Bloqueio ativado. Ele vale a partir da próxima abertura.'); } }
         catch (e) { toast(e && e.message === 'nao-suportado' ? 'Este aparelho ou navegador não oferece Face ID/digital para sites.' : 'Não foi possível. Foi cancelado ou não permitido.'); }
@@ -1518,6 +1552,7 @@ document.addEventListener('click', async ev => {
       // relatório
       case 'cicloPrev': { const c = contaDe(S.relContaId); abrirRel(c.id, cicloAnterior(c.ciclo, S.relCiclo)); render(); break; }
       case 'cicloNext': { const c = contaDe(S.relContaId); abrirRel(c.id, cicloSeguinte(c.ciclo, S.relCiclo)); render(); break; }
+      case 'resumoPadrao': S.rel.textoResumo = ''; render(); toast('Voltei ao texto padrão'); break;
       case 'toggleSc': { const m = S.rel.membros[+d.m]; m.sc = m.sc || []; m.sc = m.sc.includes(d.d) ? m.sc.filter(x => x !== d.d) : [...m.sc, d.d]; render(); break; }
       case 'rmData': { const m = S.rel.membros[+d.m]; m.datas = m.datas.filter(x => x !== d.d); m.sc = (m.sc || []).filter(x => x !== d.d); if (ehPrepago()) { m.extras = (m.extras || []).filter(x => x !== d.d); m.faltas = [...new Set([...(m.faltas || []), d.d])]; } render(); break; }
       case 'addData': { const v = ($(`#add-${d.m}`) || {}).value; if (!v) { toast('Escolha a data'); break; } const m = S.rel.membros[+d.m]; if (!m.datas.includes(v)) m.datas = [...m.datas, v].sort(); if (ehPrepago()) { m.faltas = (m.faltas || []).filter(x => x !== v); m.extras = [...new Set([...(m.extras || []), v])]; } render(); break; }
@@ -1529,7 +1564,7 @@ document.addEventListener('click', async ev => {
       case 'addAjuste': { const desc = $('#ajDesc').value.trim(), v = Number($('#ajVal').value); if (!desc || !v) { toast('Informe descrição e valor'); break; } S.rel.ajustes = [...(S.rel.ajustes || []), { desc, valor: v }]; render(); break; }
       case 'rmAjuste': S.rel.ajustes.splice(+d.i, 1); render(); break;
       case 'decisao': S.rel.decisao = d.v || null; render(); break;
-      case 'recalcular': { const ant = S.rel; abrirRel(S.relContaId, S.relCiclo, true); const c = contaDe(S.relContaId); if (c.estilo === 2 || c.estilo === 3) { S.rel.membros.forEach((m, i) => { const o = ant.membros[i]; if (o) { m.dias = o.dias || null; m.faltas = o.faltas || []; m.extras = o.extras || []; } }); replanejar(c, S.rel, ctx().idx); } render(); toast('Datas recalculadas (avisos mantidos)'); break; }
+      case 'recalcular': { const ant = S.rel; abrirRel(S.relContaId, S.relCiclo, true); const c = contaDe(S.relContaId); if (c.estilo === 2 || c.estilo === 3) { S.rel.membros.forEach((m, i) => { const o = ant.membros[i]; if (o) { m.dias = o.dias || null; m.faltas = o.faltas || []; m.extras = o.extras || []; } }); replanejar(c, S.rel, ctx().idx); } S.rel.observacao = ant.observacao || ''; S.rel.textoResumo = ant.textoResumo || ''; render(); toast('Datas recalculadas (avisos mantidos)'); break; }
       case 'editarPagas': { const rd = relAtual(); S.rel.pagasOverride = clone(rd.recon.pagas); render(); break; }
       case 'rmPaga': { const mb = contaDe(S.relContaId).membros[+d.m]; S.rel.pagasOverride[mb.nome] = S.rel.pagasOverride[mb.nome].filter(x => x !== d.d); render(); break; }
       case 'addPaga': { const v = ($(`#addp-${d.m}`) || {}).value; if (!v) { toast('Escolha a data'); break; } const mb = contaDe(S.relContaId).membros[+d.m]; const l = S.rel.pagasOverride[mb.nome] || []; if (!l.includes(v)) S.rel.pagasOverride[mb.nome] = [...l, v].sort(); render(); break; }
@@ -1542,6 +1577,9 @@ document.addEventListener('click', async ev => {
 document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.dataset && t.dataset.vn !== undefined) { const k = t.dataset.vn, ym = k.slice(0, 7), val = t.value.trim(); velSalvar(ym, x => { if (val === '') delete x.ajustes[k]; else x.ajustes[k] = Math.max(0, Math.round(+val)); }); return; }
+  if (t.id === 'obsRel' && S.rel) { S.rel.observacao = t.value; render(); return; }
+  if (t.id === 'txtResumo' && S.rel) { S.rel.textoResumo = t.value; render(); return; }
+  if (t.id === 'obsVel') { const ym = velMesAtual(), val = t.value; velSalvar(ym, x => { x.obs = val; }); return; }
   if (t.id === 'impFiles') { const novos = []; for (const f of [...(t.files || [])]) { const r = { file: f, contar: true, ...lerNomeArq(f.name) }; S.imp.push(r); novos.push(r); } S.impAberto = true; render(); novos.forEach(r => prepararImp(r)); return; }
   if (t.dataset && t.dataset.imp !== undefined) { const r = S.imp[+t.dataset.imp], f = t.dataset.f; if (r) {
       if (f === 'contar') { r.contar = t.checked; render(); }
@@ -1576,6 +1614,7 @@ function vVelocity() {
   ${v.semN ? `<div class="note bad" style="margin-top:10px"><b>${v.semN} sessão(ões) sem nº de alunos.</b> Preencha para fechar o total e liberar o PDF.</div>` : ''}
   <div class="blk" style="margin-top:12px"><span class="lbl">Incluir sessão à mão</span><div class="grid2"><input type="date" id="vxD" aria-label="Data da sessão"><input id="vxH" placeholder="Horário (ex.: 7:15)" aria-label="Horário"></div><div class="grid2" style="margin-top:8px"><input id="vxN" type="number" inputmode="numeric" placeholder="Nº de alunos" aria-label="Nº de alunos"><button class="btn sm" data-act="velAdd">Incluir</button></div></div>
   ${rem.length ? `<div class="blk"><span class="lbl">Tiradas do mês (toque para voltar)</span><div class="chips">${rem.map(k => `<span class="dchip cinza"><button data-act="velBack" data-k="${esc(k)}">${brShort(k.split('|')[0])} ${esc(k.split('|')[1])}</button></span>`).join(' ')}</div></div>` : ''}</div>
+  <h2>Observação</h2><div class="card pad"><label class="lbl" for="obsVel">Comentário extra que aparece no relatório (opcional)</label><textarea id="obsVel" rows="3" aria-label="Observação do relatório da Velocity">${esc(v.obs || '')}</textarea></div>
   <h2>Prévia</h2><div class="paper-wrap">${velPreviaHTML(v)}</div>
   <div class="btns" style="margin-top:12px"><button class="btn pri" data-act="velPdf" ${v.semN || !v.sessoes.length ? 'disabled' : ''}>Salvar PDF</button><button class="btn" data-act="velCopiar" ${v.sessoes.length ? '' : 'disabled'}>Copiar texto</button></div>
   <p class="muted" style="font-size:13px">${v.semN ? 'Preencha o nº de alunos de todas as sessões para liberar o PDF.' : `Arquivo: ${esc(v.arquivo)}`}</p>`;
@@ -1584,7 +1623,7 @@ function vVelocity() {
 function velPreviaHTML(v) {
   return `<div class="paper"><img src="${LOGO}" alt="FMG"><hr><h4>RELATÓRIO DE AULAS</h4><p class="per">Período: ${esc(v.periodoTxt)}</p><p class="alu">Turma: Velocity</p>
     <table><thead><tr><th>Data</th><th>Dia</th><th>Horário</th><th>Nº Alunos</th><th>Faixa</th><th>Valor</th></tr></thead><tbody>${v.sessoes.map(s => `<tr><td>${br(s.d)}</td><td>${esc(s.dia)}</td><td>${esc(s.hora)}</td><td>${s.n == null ? '?' : s.n}</td><td>${s.faixa ? esc(s.faixa) : '—'}</td><td>${s.valor == null ? '—' : fmt(s.valor)}</td></tr>`).join('')}</tbody></table>
-    <div class="bar">Subtotal aulas: <b>${fmt(v.total)}</b> (${v.sessoes.length} sessões, valor por faixa de alunos)</div><div class="bar tot">TOTAL GERAL: ${fmt(v.total)}</div>
+    <div class="bar">Subtotal aulas: <b>${fmt(v.total)}</b> (${v.sessoes.length} sessões, valor por faixa de alunos)</div><div class="bar tot">TOTAL GERAL: ${fmt(v.total)}</div>${v.obs ? `<div class="bar obs" style="white-space:pre-wrap"><b>Observação:</b> ${esc(v.obs)}</div>` : ''}
     <div class="foot">Pagamento via PIX<br><b>Chave CNPJ: ${esc(S.config.pix)}</b><br>${esc(S.config.assinatura)}</div></div>`;
 }
 function pdfVelocity(doc, v, cfg, k) {
@@ -1610,6 +1649,7 @@ function pdfVelocity(doc, v, cfg, k) {
   const barra = (h, bg) => { ensure(h); doc.setFillColor(...bg); doc.rect(mx, y, cw, h, 'F'); };
   { const h = 26 * k; barra(h, COR.light); pdfSegs(doc, [{ t: 'Subtotal aulas: ' }, { t: fmt(v.total), b: true }, { t: ` (${v.sessoes.length} sessões, valor por faixa de alunos)` }], mx + 12, y + h / 2 + 3.5, 10); y += h + 4 * k; }
   y += -2 * k; { const h = 27 * k; barra(h, COR.orange); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...COR.white); doc.text('TOTAL GERAL: ' + fmt(v.total), mx + 12, y + h / 2 + 4); y += h; }
+  { const oh = obsAltura(doc, v.obs, cw, 9.5, k); if (oh) { ensure(oh + 8); y = pdfObs(doc, v.obs, mx, y, cw, 9.5, k); } }
   y += 42.5 * k; ensure(60); pdfRodape(doc, cfg, W, y, 9);
 }
 function gerarPDFVel(v, cfg) {
@@ -1664,7 +1704,7 @@ const ICONES = {
 const ROTULOS = { inicio: 'Início', semana: 'Semana', rel: 'Relatórios', arquivo: 'Arquivo', alunos: 'Alunos', salario: 'Salário' };
 function renderChrome() {
   $('#tabs').innerHTML = '<div>' + Object.keys(ROTULOS).map(k => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONES[k]}</svg>${ROTULOS[k]}</button>`).join('') + '</div>';
-  $('#hoje').innerHTML = `<span class="sync ${S.sync ? '' : 'off'}"></span>${S.sync ? 'Sincronizado' : 'Sem conexão'}`;
+  $('#hoje').innerHTML = `<span class="synctxt"><span class="sync ${S.sync ? '' : 'off'}"></span>${S.sync ? 'Sincronizado' : 'Sem conexão'}</span><button class="btn sm dng sair" data-act="sair" aria-label="Sair da conta">Sair</button>`;
 }
 let pend = false;
 function render(forte) {
@@ -1719,12 +1759,20 @@ const Lock = (() => {
       const tentar = async auto => { if (busy) return; busy = true; try { await verificar(); o.remove(); res(); } catch (e) { if (!auto) o.querySelector('#lkErr').textContent = 'Não consegui confirmar. Toque em Desbloquear para tentar de novo.'; } busy = false; };
       o.querySelector('#lkGo').addEventListener('click', () => tentar(false));
       o.querySelector('#lkOut').addEventListener('click', async () => { desativar(); try { await Plat.cliente().auth.signOut(); } catch (e) { } location.reload(); });
+      document.addEventListener('visibilitychange', () => { if (!document.hidden && document.getElementById('lockov')) tentar(true); });
       tentar(true);
     });
   }
+  const ESP = KEY + ':esp';
+  const espera = () => { try { const v = localStorage.getItem(ESP); return v === null ? 0 : Math.max(0, +v || 0); } catch (e) { return 0; } };
+  const setEspera = s => { try { localStorage.setItem(ESP, String(s)); } catch (e) { } };
   let oculto = 0;
-  document.addEventListener('visibilitychange', () => { if (document.hidden) oculto = Date.now(); else if (ativo() && oculto && Date.now() - oculto > 30000) tela(); });
-  return { ativo, ativar, verificar, desativar, tela, suportado };
+  document.addEventListener('visibilitychange', () => {
+    if (!ativo()) return;
+    if (document.hidden) { oculto = Date.now(); if (espera() === 0) tela(); }
+    else if (espera() > 0 && oculto && Date.now() - oculto > espera() * 1000) tela();
+  });
+  return { ativo, ativar, verificar, desativar, tela, suportado, espera, setEspera };
 })();
 
 async function boot() {
