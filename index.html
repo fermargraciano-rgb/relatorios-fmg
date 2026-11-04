@@ -95,7 +95,7 @@ button.chip:active { transform: scale(.97); }
 
 /* abas */
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); z-index: 20; padding: 0 max(8px, env(safe-area-inset-left, 0px)) env(safe-area-inset-bottom, 0px) max(8px, env(safe-area-inset-right, 0px)); }
-.tabs div { max-width: 760px; margin: 0 auto; display: grid; grid-template-columns: repeat(5, 1fr); }
+.tabs div { max-width: 760px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); }
 .tabs button { background: none; border: 0; padding: 9px 0 8px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); font-family: var(--f-disp); font-weight: 600; font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; min-height: 56px; }
 .tabs button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tabs button[aria-current="page"] { color: var(--ink); box-shadow: inset 0 3px 0 var(--acc); }
@@ -253,6 +253,8 @@ button.chip:active { transform: scale(.97); }
 .lbox .lbl { color:#C9C7BF; }
 .lbox #lgErr { color:#F0867A !important; }
 .paper tr:nth-child(even) td { background: var(--paper); }
+
+@media (max-width: 400px) { .tabs button { font-size: 11px; } }
 
 </style>
 <div class="wrap">
@@ -654,7 +656,19 @@ function salarioMes(ym, o) {
   if (v.sessoes.length) itens.push({ tipo: 'velocity', nome: 'Velocity (turma)', ini: v.ini, fim: v.fim, total: v.total, pago: false, sessoes: v.sessoes.length, semN: v.semN });
   const total = itens.reduce((t, i) => t + i.total, 0);
   const recebido = itens.filter(i => i.tipo === 'aluno' && i.pago).reduce((t, i) => t + i.total, 0);
-  return { ym, itens, total, recebido, aberto: total - recebido, nAlunos: itens.filter(i => i.tipo === 'aluno').length, semN: v.semN };
+  const personal = itens.filter(i => i.tipo === 'aluno').reduce((t, i) => t + i.total, 0), velTotal = itens.filter(i => i.tipo === 'velocity').reduce((t, i) => t + i.total, 0);
+  return { ym, itens, total, personal, velocity: velTotal, recebido, aberto: total - recebido, nAlunos: itens.filter(i => i.tipo === 'aluno').length, semN: v.semN };
+}
+function salarioAno(ano, o) {
+  const meses = []; for (let m = 1; m <= 12; m++) meses.push(salarioMes(`${ano}-${String(m).padStart(2, '0')}`, o));
+  const soma = k => meses.reduce((t, x) => t + x[k], 0);
+  return { ano, meses, personal: soma('personal'), velocity: soma('velocity'), total: soma('total'), semN: soma('semN') };
+}
+function salarioAnos(o, hojeAno) {
+  const set = new Set([hojeAno]);
+  for (const f of Object.values(o.faturas || {})) { const c = (o.contas || []).find(x => x.id === f.contaId); set.add(+mesDaFatura(f, c, o.modo).slice(0, 4)); }
+  for (const s of velocitySessoes(o.semanas)) set.add(+s.d.slice(0, 4));
+  return [...set].sort((a, b) => b - a).map(a => salarioAno(a, o));
 }
 function salarioMeses(o, hojeYm) {
   const set = new Set([hojeYm]);
@@ -812,11 +826,7 @@ function vInicio() {
   const ult = S.semanas[S.semanas.length - 1];
   const dentro = ult && ult.ini <= S.hoje && S.hoje <= ult.fim;
   const agendaMsg = !ult ? 'Nenhuma agenda salva ainda.' : dentro ? `Agenda desta semana salva (${brShort(ult.ini)} – ${brShort(ult.fim)}).` : `Última agenda salva: ${brShort(ult.ini)} – ${brShort(ult.fim)}. Falta a desta semana.`;
-  const vm = velMesAtual(), vv = velocityMes(vm, S.semanas, S.velocity[vm]);
-  const velCard = `<h2>Velocity · ${nomeMes(vm)}</h2><div class="card"><div class="row" data-act="velAbrir"><div class="main"><b>${vv.sessoes.length ? `${vv.sessoes.length} sessões · <span class="num">${fmt(vv.total)}</span>` : 'Nenhuma sessão lida da agenda'}</b><small>${vv.semN ? `${vv.semN} sem nº de alunos · ` : ''}Prévia do que você recebe no mês</small></div><span class="chip ${vv.semN ? 'acc' : 'ok'}">${vv.semN ? 'Conferir' : 'Ver'}</span></div></div>`;
-  const sm = salarioMes(S.hoje.slice(0, 7), salOpts());
-  const salCard = `<h2>Salário · ${nomeMes(S.hoje.slice(0, 7))}</h2><div class="card"><div class="row" data-act="salAbrir"><div class="main"><b class="num">${fmt(sm.total)}</b><small>${sm.nAlunos} relatório(s)${sm.itens.some(i => i.tipo === 'velocity') ? ' + Velocity' : ''} · soma dos ciclos, mês a mês</small></div><span class="chip ok">Ver</span></div></div>`;
-  return `${salCard}${velCard}<h2>Fechamentos</h2><div class="card">${linhas.map(row).join('')}</div>
+  return `<h2>Fechamentos</h2><div class="card">${linhas.map(row).join('')}</div>
   <h2>Agenda</h2><div class="card"><div class="row" data-act="irSemana"><div class="main"><b>${agendaMsg}</b><small>Cole o texto das Notas na aba Semana</small></div><span class="chip ${dentro ? 'ok' : 'acc'}">${dentro ? 'Em dia' : 'Pendente'}</span></div></div>
   <h2>A receber${abertos.length ? ` · <span class="num">${fmt(soma)}</span>` : ''}</h2>
   <div class="card">${abertos.length ? abertos.map(f => `<div class="row"><div class="main"><b>${esc(f.nome || contaDe(f.contaId)?.nome || f.contaId)}</b><small>${brShort(f.ini)} – ${brShort(f.fim)}</small></div><span class="valor">${fmt(f.total || 0)}</span><button class="btn sm" data-act="pago" data-id="${f.id}">Recebido</button></div>`).join('') : '<div class="row"><div class="main muted">Nada em aberto nos relatórios gerados.</div></div>'}</div>
@@ -1483,8 +1493,7 @@ document.addEventListener('click', async ev => {
         try { if (Lock.ativo()) { await Lock.verificar(); Lock.desativar(); toast('Bloqueio desativado'); } else { await Lock.ativar(); toast('Bloqueio ativado. Ele vale a partir da próxima abertura.'); } }
         catch (e) { toast(e && e.message === 'nao-suportado' ? 'Este aparelho ou navegador não oferece Face ID/digital para sites.' : 'Não foi possível. Foi cancelado ou não permitido.'); }
         render(); break; }
-      case 'velAbrir': S.tab = 'velocity'; S.velMes = velMesAtual(); render(true); window.scrollTo(0, 0); break;
-      case 'velVoltar': S.tab = 'inicio'; render(true); window.scrollTo(0, 0); break;
+            case 'velVoltar': S.tab = 'salario'; render(true); window.scrollTo(0, 0); break;
       case 'velPrev': S.velMes = velSomaMes(velMesAtual(), -1); render(true); break;
       case 'velNext': S.velMes = velSomaMes(velMesAtual(), 1); render(true); break;
       case 'velRm': { const ym = velMesAtual(); await velSalvar(ym, x => { x.remover = [...new Set([...x.remover, d.k])]; x.extras = x.extras.filter(e => e.d + '|' + e.hora !== d.k); delete x.ajustes[d.k]; }); break; }
@@ -1497,12 +1506,13 @@ document.addEventListener('click', async ev => {
       }
       case 'velPdf': await velPdf(); break;
       case 'velCopiar': { const ym = velMesAtual(), v = velocityMes(ym, S.semanas, S.velocity[ym]); try { await navigator.clipboard.writeText(textoVelocity(v)); toast('Texto copiado'); } catch (e) { abrirSheet(`<div class="in"><div class="hd"><h3>Copiar texto</h3><button class="btn sm" data-act="sheetFechar">Fechar</button></div><textarea id="txtCopia" rows="16" readonly>${esc(textoVelocity(v))}</textarea></div>`); } break; }
-      case 'salAbrir': S.tab = 'salario'; S.salMes = S.hoje.slice(0, 7); render(true); window.scrollTo(0, 0); break;
-      case 'salPrev': S.salMes = velSomaMes(salMesAtual(), -1); render(true); break;
-      case 'salNext': S.salMes = velSomaMes(salMesAtual(), 1); render(true); break;
-      case 'salMes': S.salMes = d.ym; render(true); window.scrollTo(0, 0); break;
+      case 'salAno': S.salAno = +d.ano; S.salNivel = 'ano'; render(true); window.scrollTo(0, 0); break;
+      case 'salMes': S.salMes = d.ym; S.salNivel = 'mes'; render(true); window.scrollTo(0, 0); break;
+      case 'salVoltar': S.salNivel = S.salNivel === 'mes' ? 'ano' : 'anos'; render(true); window.scrollTo(0, 0); break;
+      case 'salPrev': if (S.salNivel === 'mes') { S.salMes = velSomaMes(S.salMes, -1); S.salAno = +S.salMes.slice(0, 4); } else S.salAno = S.salAno - 1; render(true); break;
+      case 'salNext': if (S.salNivel === 'mes') { S.salMes = velSomaMes(S.salMes, 1); S.salAno = +S.salMes.slice(0, 4); } else S.salAno = S.salAno + 1; render(true); break;
       case 'salModo': { S.config = { ...S.config, salarioModo: d.v }; render(); await Store.set('config', 'geral', S.config); break; }
-      case 'velAbrirMes': S.tab = 'velocity'; S.velMes = d.ym; render(true); window.scrollTo(0, 0); break;
+      case 'velAbrirMes': S.tab = 'velocity'; S.velMes = d.ym; S.velOrigem = 'salario'; render(true); window.scrollTo(0, 0); break;
       case 'sair': { await Plat.cliente().auth.signOut(); break; }
       case 'salvarCfg': { const ig = $('#cfgIgn').value.split(',').map(x => x.trim()).filter(Boolean); S.config = { ...S.config, ignorar: ig, pix: $('#cfgPix').value.trim(), assinatura: $('#cfgAss').value.trim() }; await Store.set('config', 'geral', S.config); toast('Configurações salvas'); break; }
       // relatório
@@ -1558,7 +1568,7 @@ function vVelocity() {
   const linha = s => `<div class="row" style="padding:10px 0;gap:8px;flex-wrap:wrap"><div class="main"><b>${brShort(s.d)} ${esc(s.dia.split('-')[0])} · ${esc(s.hora)}</b><small>${s.fonte === 'manual' ? 'incluída por você' : s.ajustado ? 'nº alterado por você' : 'lido da agenda'} · ${s.faixa ? esc(s.faixa) : '<b style="color:var(--bad)">informe o nº de alunos</b>'}</small></div>
     <input type="number" inputmode="numeric" min="0" max="99" value="${s.n == null ? '' : s.n}" placeholder="alunos" data-vn="${esc(s.key)}" aria-label="Alunos em ${brShort(s.d)} ${esc(s.hora)}" style="width:78px;text-align:center"><span class="valor" style="min-width:74px;text-align:right">${s.valor == null ? '—' : fmt(s.valor)}</span><button class="btn sm" data-act="velRm" data-k="${esc(s.key)}" aria-label="Tirar esta sessão">×</button></div>`;
   const rem = (v.removidas || []);
-  let h = `<div class="btns" style="margin-top:6px"><button class="btn sm" data-act="velVoltar">‹ Início</button></div>
+  let h = `<div class="btns" style="margin-top:6px"><button class="btn sm" data-act="velVoltar">‹ Salário</button></div>
   <div class="card pad" style="margin-top:8px"><div class="nav"><button data-act="velPrev" aria-label="Mês anterior">‹</button><div><b class="num">Velocity · ${nomeMes(ym)}</b><small>${esc(v.periodoTxt)} · mês corrido</small></div><button data-act="velNext" aria-label="Próximo mês">›</button></div></div>
   <h2>Você recebe${passou ? '' : ' (até agora)'}: <span class="num">${fmt(v.total)}</span></h2>
   <div class="card pad"><p class="muted" style="margin:0 0 6px;font-size:13px">Sessões lidas das agendas salvas (linhas “Velocity - 6:00 (16)”). O valor de cada sessão depende do nº de alunos: menos de 20 = R$ 70 · 20 a 22 = R$ 75 · 23 a 25 = R$ 80 · 26 ou mais = R$ 90. Você pode corrigir o nº de alunos ou tirar uma sessão.</p>
@@ -1617,28 +1627,41 @@ async function velPdf() {
 const salModo = () => (S.config && S.config.salarioModo) === 'fim' ? 'fim' : 'recebimento';
 const salOpts = () => ({ faturas: S.faturas, contas: S.contas, semanas: S.semanas, velocity: S.velocity, modo: salModo() });
 const salMesAtual = () => S.salMes || S.hoje.slice(0, 7);
+const salAnoAtual = () => S.salAno || +S.hoje.slice(0, 4);
+function salModoBloco() {
+  return `<h2>Como contar cada ciclo</h2><div class="card pad"><div class="btns"><button class="btn sm ${salModo() === 'recebimento' ? 'pri' : ''}" data-act="salModo" data-v="recebimento">Mês em que recebo</button><button class="btn sm ${salModo() === 'fim' ? 'pri' : ''}" data-act="salModo" data-v="fim">Mês em que o ciclo termina</button></div>
+  <small style="display:block;margin-top:8px">${salModo() === 'recebimento' ? 'Quem paga antes de treinar (estilo “paga e depois faz”) conta no mês em que o ciclo começa; os demais, no mês em que termina.' : 'Todo ciclo conta no mês em que termina (ex.: 20/09 a 19/10 entra em outubro).'} A Velocity conta no mês corrido da aula. Só entram relatórios já gerados (ou importados) no app.</small></div>`;
+}
+const salTrio = (x, destaque) => `<div class="grid2" style="grid-template-columns:repeat(3,1fr);gap:6px;text-align:right"><div><small>Personal</small><div class="num"><b>${fmt(x.personal)}</b></div></div><div><small>Velocity</small><div class="num"><b>${fmt(x.velocity)}</b></div></div><div><small>Total</small><div class="num" style="${destaque ? 'color:var(--acc-text)' : ''}"><b>${fmt(x.total)}</b></div></div></div>`;
 function vSalario() {
-  const ym = salMesAtual(), o = salOpts(), m = salarioMes(ym, o), todos = salarioMeses(o, S.hoje.slice(0, 7)), max = Math.max(1, ...todos.map(x => x.total));
-  const it = i => i.tipo === 'velocity'
-    ? `<div class="row" data-act="velAbrirMes" data-ym="${ym}"><div class="main"><b>${esc(i.nome)}</b><small>${i.sessoes} sessões · mês corrido${i.semN ? ` · <b style="color:var(--bad)">${i.semN} sem nº de alunos</b>` : ''}</small></div><span class="valor">${fmt(i.total)}</span><span class="chip acc">Ver</span></div>`
-    : `<div class="row"><div class="main"><b>${esc(i.nome)}</b><small>${brShort(i.ini)} – ${brShort(i.fim)}${i.legado ? ' · anterior ao app' : ''}</small></div><span class="valor">${fmt(i.total)}</span><span class="chip ${i.pago ? 'ok' : 'acc'}">${i.pago ? 'Recebido' : 'A receber'}</span></div>`;
-  return `<div class="btns" style="margin-top:6px"><button class="btn sm" data-act="velVoltar">‹ Início</button></div>
-  <div class="card pad" style="margin-top:8px"><div class="nav"><button data-act="salPrev" aria-label="Mês anterior">‹</button><div><b class="num">Salário · ${nomeMes(ym)}</b><small>${m.nAlunos} relatório(s) de alunos${m.itens.some(i => i.tipo === 'velocity') ? ' + Velocity' : ''}</small></div><button data-act="salNext" aria-label="Próximo mês">›</button></div></div>
-  <div class="card pad" style="margin-top:8px"><p class="muted" style="margin:0;font-size:13px">Total do mês</p><p class="num" style="margin:2px 0 8px;font-size:30px;font-family:var(--f-disp);font-weight:700">${fmt(m.total)}</p>
-    <div class="grid2"><div><small>Recebido (alunos)</small><div class="num"><b>${fmt(m.recebido)}</b></div></div><div><small>A receber / Velocity</small><div class="num"><b>${fmt(m.aberto)}</b></div></div></div>${m.semN ? `<div class="note bad" style="margin-top:10px">Há sessões da Velocity sem nº de alunos: o total ainda pode subir.</div>` : ''}</div>
-  <h2>Composição</h2><div class="card">${m.itens.length ? m.itens.map(it).join('') : '<div class="row"><div class="main muted">Nenhum relatório gerado neste mês.</div></div>'}</div>
-  <h2>Mês a mês</h2><div class="card">${todos.map(x => `<div class="row" data-act="salMes" data-ym="${x.ym}" style="${x.ym === ym ? 'background:var(--acc-soft)' : ''}"><div class="main"><b>${nomeMes(x.ym)}</b><div style="height:6px;border-radius:3px;background:var(--surface2);margin-top:6px;overflow:hidden"><div style="height:100%;width:${Math.round(x.total / max * 100)}%;background:var(--acc)"></div></div></div><span class="valor">${fmt(x.total)}</span></div>`).join('')}</div>
-  <h2>Como contar cada ciclo</h2><div class="card pad"><div class="btns"><button class="btn sm ${salModo() === 'recebimento' ? 'pri' : ''}" data-act="salModo" data-v="recebimento">Mês em que recebo</button><button class="btn sm ${salModo() === 'fim' ? 'pri' : ''}" data-act="salModo" data-v="fim">Mês em que o ciclo termina</button></div>
-  <small style="display:block;margin-top:8px">${salModo() === 'recebimento' ? 'Quem paga antes de treinar (estilo “paga e depois faz”) conta no mês em que o ciclo começa; os demais, no mês em que termina. A Velocity conta no mês corrido da aula.' : 'Todo ciclo conta no mês em que termina (ex.: 20/09 a 19/10 entra em outubro). A Velocity conta no mês corrido da aula.'} Só entram relatórios já gerados (ou importados) no app.</small></div>`;
+  const o = salOpts(), nivel = S.salNivel || 'anos';
+  if (nivel === 'mes') {
+    const ym = S.salMes, m = salarioMes(ym, o), al = m.itens.filter(i => i.tipo === 'aluno'), vel = m.itens.find(i => i.tipo === 'velocity');
+    return `<div class="btns" style="margin-top:6px"><button class="btn sm" data-act="salVoltar">‹ ${S.salAno}</button></div>
+    <div class="card pad" style="margin-top:8px"><div class="nav"><button data-act="salPrev" aria-label="Mês anterior">‹</button><div><b class="num">${nomeMes(ym)}</b><small>detalhe do mês</small></div><button data-act="salNext" aria-label="Próximo mês">›</button></div></div>
+    <div class="card pad" style="margin-top:8px"><small>Total do mês</small><p class="num" style="margin:2px 0 8px;font-size:30px;font-family:var(--f-disp);font-weight:700">${fmt(m.total)}</p>${salTrio(m)}</div>
+    <h2>Personal · <span class="num">${fmt(m.personal)}</span></h2><div class="card">${al.length ? al.map(i => `<div class="row"><div class="main"><b>${esc(i.nome)}</b><small>${brShort(i.ini)} – ${brShort(i.fim)}${i.legado ? ' · anterior ao app' : ''}</small></div><span class="valor">${fmt(i.total)}</span><span class="chip ${i.pago ? 'ok' : 'acc'}">${i.pago ? 'Recebido' : 'A receber'}</span></div>`).join('') : '<div class="row"><div class="main muted">Nenhum relatório de aluno neste mês.</div></div>'}</div>
+    <h2>Velocity · <span class="num">${fmt(m.velocity)}</span></h2><div class="card">${vel ? `<div class="row" data-act="velAbrirMes" data-ym="${ym}"><div class="main"><b>${vel.sessoes} sessões · mês corrido</b><small>${vel.semN ? `<b style="color:var(--bad)">${vel.semN} sem nº de alunos</b> · ` : ''}Toque para ver as sessões, a prévia e o PDF</small></div><span class="valor">${fmt(vel.total)}</span><span class="chip acc">Abrir</span></div>` : '<div class="row"><div class="main muted">Nenhuma sessão da Velocity neste mês.</div></div>'}</div>`;
+  }
+  if (nivel === 'ano') {
+    const a = salarioAno(S.salAno, o);
+    return `<div class="btns" style="margin-top:6px"><button class="btn sm" data-act="salVoltar">‹ Anos</button></div>
+    <div class="card pad" style="margin-top:8px"><div class="nav"><button data-act="salPrev" aria-label="Ano anterior">‹</button><div><b class="num">${a.ano}</b><small>toque num mês para ver o detalhe</small></div><button data-act="salNext" aria-label="Próximo ano">›</button></div></div>
+    <h2>Meses</h2><div class="card">${a.meses.map(x => { const vazio = !x.itens.length; return `<div class="row" data-act="salMes" data-ym="${x.ym}" style="${vazio ? 'opacity:.55' : ''}"><div class="main"><b>${MESES_NOME[+x.ym.slice(5) - 1][0].toUpperCase() + MESES_NOME[+x.ym.slice(5) - 1].slice(1)}</b><small>Personal ${fmt(x.personal)} · Velocity ${fmt(x.velocity)}</small></div><span class="valor">${fmt(x.total)}</span></div>`; }).join('')}</div>
+    <h2>Total de ${a.ano}</h2><div class="card pad">${salTrio(a, true)}</div>${a.semN ? `<div class="note bad" style="margin-top:10px">Há sessões da Velocity sem nº de alunos: o total do ano ainda pode subir.</div>` : ''}${salModoBloco()}`;
+  }
+  const anos = salarioAnos(o, +S.hoje.slice(0, 4));
+  return `<h2 style="margin-top:6px">Salário</h2><div class="card">${anos.map(a => `<div class="row" data-act="salAno" data-ano="${a.ano}"><div class="main"><b class="num" style="font-size:20px">${a.ano}</b><small>Personal ${fmt(a.personal)} · Velocity ${fmt(a.velocity)}</small></div><span class="valor">${fmt(a.total)}</span><span class="chip ok">Meses ›</span></div>`).join('')}</div>${salModoBloco()}`;
 }
 const ICONES = {
   inicio: '<path d="M4 11.5 12 5l8 6.5V19a1 1 0 0 1-1 1h-4v-5h-6v5H5a1 1 0 0 1-1-1z"/>',
   semana: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
   rel: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
   arquivo: '<path d="M3.5 7.5V19h17V9.5h-9L9.5 7.5z"/><path d="M3.5 7.5V5.5h6l2 2"/>',
+  salario: '<rect x="3.5" y="6.5" width="17" height="11" rx="2"/><circle cx="12" cy="12" r="2.4"/><path d="M6.5 9.5v.01M17.5 14.5v.01"/>',
   alunos: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.2c2.6-.3 4.2 1.2 4.7 4.3"/>'
 };
-const ROTULOS = { inicio: 'Início', semana: 'Semana', rel: 'Relatórios', arquivo: 'Arquivo', alunos: 'Alunos' };
+const ROTULOS = { inicio: 'Início', semana: 'Semana', rel: 'Relatórios', arquivo: 'Arquivo', alunos: 'Alunos', salario: 'Salário' };
 function renderChrome() {
   $('#tabs').innerHTML = '<div>' + Object.keys(ROTULOS).map(k => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONES[k]}</svg>${ROTULOS[k]}</button>`).join('') + '</div>';
   $('#hoje').innerHTML = `<span class="sync ${S.sync ? '' : 'off'}"></span>${S.sync ? 'Sincronizado' : 'Sem conexão'}`;
