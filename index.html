@@ -262,6 +262,15 @@ button.chip:active { transform: scale(.97); }
 .synctxt { white-space: nowrap; }
 .btn.sair { white-space: nowrap; padding: 5px 16px; }
 
+.vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; clip: rect(0 0 0 0); }
+.dropzone { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; padding: 22px 14px; border: 2px dashed var(--line); border-radius: 12px; cursor: pointer; background: var(--surface2); margin-bottom: 12px; transition: border-color .15s, background .15s; }
+.dropzone b { font-family: var(--f-disp); letter-spacing: .03em; font-size: 16px; }
+.dropzone span { color: var(--muted); font-size: 13px; }
+.dropzone:focus-within { outline: 2px solid var(--acc); outline-offset: 2px; }
+body.arrastando .dropzone { border-color: var(--acc); background: var(--acc-soft); }
+body.arrastando .dropzone b { color: var(--acc-text); }
+@media (pointer: coarse) { .dropzone b { font-size: 15px; } }
+
 </style>
 <div class="wrap">
   <header class="top">
@@ -1001,8 +1010,8 @@ function impDados(r, i) {
 function impCard() {
   const opts = (sel) => `<option value="">Escolha…</option>${S.contas.map(c => `<option value="${esc(c.id)}" ${sel === c.id ? 'selected' : ''}>${esc(c.nome)}</option>`).join('')}<option value="__outro" ${sel === '__outro' ? 'selected' : ''}>Outro aluno…</option>`;
   let h = `<details class="card imp" ${S.impAberto || S.imp.length ? 'open' : ''}><summary><b>Importar relatórios antigos</b><span class="cnt">PDFs do histórico</span></summary><div class="pad">
-    <p class="muted" style="margin:0 0 10px;font-size:13px">Escolha os PDFs antigos (pode marcar vários). O app tenta descobrir o aluno e o mês pelo nome do arquivo, como <i>Relatorio_Joana_082026.pdf</i>. Confira cada linha antes de guardar. Marque “Contar na conferência” para o app usar o relatório como base das próximas contas.</p>
-    <input type="file" id="impFiles" accept="application/pdf,.pdf" multiple>`;
+    <p class="muted" style="margin:0 0 10px;font-size:13px">Arraste os PDFs antigos para a caixa abaixo (no computador) ou escolha-os (pode marcar vários). O app tenta descobrir o aluno e o mês pelo nome do arquivo, como <i>Relatorio_Joana_082026.pdf</i>. Confira cada linha antes de guardar. Marque “Contar na conferência” para o app usar o relatório como base das próximas contas.</p>
+    <label class="dropzone" id="impDrop" for="impFiles"><b>Arraste os PDFs para cá</b><span>ou clique para escolher no computador ou no celular</span><input type="file" id="impFiles" class="vh" accept="application/pdf,.pdf" multiple></label>`;
   S.imp.forEach((r, i) => {
     h += `<div class="improw"><div class="impnome"><b>${esc(r.file.name)}</b><button class="btn sm" data-act="impRm" data-i="${i}" aria-label="Tirar da lista">×</button></div>
       <div class="grid2"><div><label class="lbl">Aluno</label><select data-imp="${i}" data-f="conta">${opts(r.conta)}</select></div>
@@ -1574,13 +1583,34 @@ document.addEventListener('click', async ev => {
     }
   } catch (e) { console.error(e); toast('Algo deu errado. Tente de novo.'); }
 });
+function addImpFiles(files) {
+  const pdfs = [...(files || [])].filter(f => /pdf/i.test(f.type) || /\.pdf$/i.test(f.name));
+  const outros = [...(files || [])].length - pdfs.length;
+  if (!pdfs.length) { toast('Só PDFs podem ser importados.'); return; }
+  const novos = []; for (const f of pdfs) { const r = { file: f, contar: true, ...lerNomeArq(f.name) }; S.imp.push(r); novos.push(r); }
+  S.tab = 'arquivo'; S.impAberto = true; render(); novos.forEach(r => prepararImp(r));
+  toast(outros ? `${pdfs.length} PDF(s) adicionados. ${outros} arquivo(s) que não são PDF foram ignorados.` : `${pdfs.length} PDF(s) adicionados. Confira cada linha e guarde.`);
+}
+// arrastar e soltar (PC): vale em qualquer ponto da página; fora da aba Arquivo só avisa
+{
+  let prof = 0; const temArq = ev => ev.dataTransfer && [...(ev.dataTransfer.types || [])].includes('Files');
+  const marca = on => document.body.classList.toggle('arrastando', on && S.tab === 'arquivo');
+  window.addEventListener('dragenter', ev => { if (!temArq(ev)) return; ev.preventDefault(); prof++; marca(true); });
+  window.addEventListener('dragover', ev => { if (!temArq(ev)) return; ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; marca(true); });
+  window.addEventListener('dragleave', ev => { if (!temArq(ev)) return; prof = Math.max(0, prof - 1); if (!prof) marca(false); });
+  window.addEventListener('drop', ev => {
+    if (!temArq(ev)) return; ev.preventDefault(); prof = 0; marca(false);
+    if (S.tab !== 'arquivo') { toast('Abra a aba Arquivo para importar PDFs.'); return; }
+    addImpFiles(ev.dataTransfer.files);
+  });
+}
 document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.dataset && t.dataset.vn !== undefined) { const k = t.dataset.vn, ym = k.slice(0, 7), val = t.value.trim(); velSalvar(ym, x => { if (val === '') delete x.ajustes[k]; else x.ajustes[k] = Math.max(0, Math.round(+val)); }); return; }
   if (t.id === 'obsRel' && S.rel) { S.rel.observacao = t.value; render(); return; }
   if (t.id === 'txtResumo' && S.rel) { S.rel.textoResumo = t.value; render(); return; }
   if (t.id === 'obsVel') { const ym = velMesAtual(), val = t.value; velSalvar(ym, x => { x.obs = val; }); return; }
-  if (t.id === 'impFiles') { const novos = []; for (const f of [...(t.files || [])]) { const r = { file: f, contar: true, ...lerNomeArq(f.name) }; S.imp.push(r); novos.push(r); } S.impAberto = true; render(); novos.forEach(r => prepararImp(r)); return; }
+  if (t.id === 'impFiles') { addImpFiles(t.files); t.value = ''; return; }
   if (t.dataset && t.dataset.imp !== undefined) { const r = S.imp[+t.dataset.imp], f = t.dataset.f; if (r) {
       if (f === 'contar') { r.contar = t.checked; render(); }
       else if (f === 'substituir') { r.substituir = t.checked; }
