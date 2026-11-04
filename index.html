@@ -243,11 +243,15 @@ button.chip:active { transform: scale(.97); }
 .dchip.cinza button { text-decoration: line-through; }
 
 .faixa-teste { background:#111; color:#E8A020; text-align:center; font-weight:600; font-size:12.5px; letter-spacing:.12em; padding:6px 10px; border-radius:8px; margin:8px 0; }
-.login { position:fixed; inset:0; z-index:100; background:#fff; display:flex; align-items:center; justify-content:center; padding:20px; }
-.lbox { width:100%; max-width:360px; }
-.lbox img { display:block; max-width:220px; margin:0 auto 18px; }
-.lbox h3 { font-family:var(--f-disp); text-transform:uppercase; letter-spacing:.05em; margin:0 0 6px; }
-.lbox input { width:100%; }
+.login { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; padding:20px; overflow:auto;
+  --bg:#0B0B0B; --surface:#2A2A2A; --ink:#F5F5F2; --muted:#A5A298; --line:#4A4944; color-scheme: dark; background:#0B0B0B; color:#F5F5F2; }
+.lbox { width:100%; max-width:380px; background:#1E1E1E; border:1px solid #363531; border-radius:14px; padding:22px 20px; box-shadow:0 6px 24px rgba(0,0,0,.5); border-top:4px solid #E8A020; }
+.lbox img { display:block; max-width:230px; width:100%; margin:0 auto 18px; background:#FFFFFF; border-radius:10px; padding:8px 10px; opacity:.88; }
+.lbox h3 { font-family:var(--f-disp); text-transform:uppercase; letter-spacing:.05em; margin:0 0 6px; color:#F5F5F2; font-size:22px; }
+.lbox input { width:100%; background:#2A2A2A; color:#F5F5F2; border:1px solid #4A4944; }
+.lbox input:focus { border-color:#E8A020; }
+.lbox .lbl { color:#C9C7BF; }
+.lbox #lgErr { color:#F0867A !important; }
 
 </style>
 <div class="wrap">
