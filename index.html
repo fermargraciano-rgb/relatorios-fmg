@@ -505,9 +505,10 @@ function nomeArquivo(conta, ini) { return `Relatorio_${conta.arquivo || norm(con
 
 function montar(rel, conta, ctx) {
   const ciclo = { ini: rel.ini, fim: rel.fim };
+  const liv = rel.livre && rel.livre.ativo ? rel.livre : null;
   const membros = rel.membros.map(m => ({ nome: m.nome, datas: [...m.datas].sort(), sc: new Set(m.sc || []) }));
   let preco = conta.preco, pres = null;
-  if (conta.estilo === 4) {
+  if (conta.estilo === 4 && !liv) {
     const nPrev = previstasDe(conta, ciclo, rel.dispensadas).length;
     const nPres = membros.reduce((s, m) => s + m.datas.length, 0);
     const pct = nPrev ? nPres / nPrev : 0;
@@ -525,15 +526,17 @@ function montar(rel, conta, ctx) {
     const faixa = pres.acima ? (incl ? `presença de ${limTxt} ou mais` : `presença acima de ${limTxt}`) : (incl ? `presença abaixo de ${limTxt}` : `presença até ${limTxt}`);
     linhas.push([{ t: `Valor por aula (${faixa}): ` }, { t: fmt(preco), b: true }]);
   }
-  for (const m of membros) {
+  const livLinhas = liv ? (liv.linhas || []).filter(x => (x.desc || '').trim() || Number(x.valor)).map(x => ({ desc: (x.desc || '').trim(), data: x.data || '', valor: Number(x.valor) || 0 })) : [];
+  if (liv) for (const x of livLinhas) { itens.push({ tipo: 'livre', desc: x.desc, valor: x.valor, aulas: null }); total += x.valor; }
+  else for (const m of membros) {
     const n = m.datas.filter(d => !m.sc.has(d)).length, v = n * preco; total += v;
     itens.push({ tipo: 'aulas', desc: m.nome, aulas: n, valor: v });
   }
-  if (membros.length === 1) {
+  if (membros.length === 1 && !liv) {
     const it = itens[0];
     linhas.push([{ t: 'Subtotal aulas: ' }, { t: fmt(it.valor), b: true }, { t: ` (${it.aulas} aulas × ${fmt(preco)})` }]);
   }
-  if (rel.taxaAtiva && conta.taxa) {
+  if (rel.taxaAtiva && conta.taxa && !liv) {
     const desc = conta.taxaDesc || 'Taxa de academia (mensal)';
     itens.push({ tipo: 'taxa', desc, valor: conta.taxa, aulas: null }); total += conta.taxa;
     linhas.push([{ t: desc + ': ' }, { t: fmt(conta.taxa), b: true }]);
@@ -565,8 +568,9 @@ function montar(rel, conta, ctx) {
   return {
     conta, rel, ciclo, preco, pres, tabelas, itens, linhas, total, recon, resumoAnterior, obs: (rel.observacao || '').trim(), notas, pendenteDecisao, saldoApos,
     arquivo: nomeArquivo(conta, rel.ini), periodoTxt: `${br(rel.ini)} – ${br(rel.fim)}`,
-    layout: membros.length > 1 ? 'pair' : 'single',
-    rotulo: membros.length > 1 ? '' : `${conta.rotulo || 'Aluno'}: ${conta.nome}`
+    layout: membros.length > 1 && !liv ? 'pair' : 'single',
+    rotulo: membros.length > 1 && !liv ? '' : `${conta.rotulo || 'Aluno'}: ${conta.nome}`,
+    livre: liv ? { titulo: (liv.titulo || '').trim(), linhas: livLinhas } : null
   };
 }
 function resumoPadrao(rd) {
@@ -585,16 +589,19 @@ function linhasResumoAnterior(rd) {
   if (custom) return custom.split(/\n+/).map(t => t.trim()).filter(Boolean).map(t => ({ t }));
   const p = resumoPadrao(rd); return p ? [{ t: p }] : [];
 }
+function soCobradas(rd) { return Object.assign({}, rd, { tabelas: rd.tabelas.map(t => Object.assign({}, t, { datas: t.datas.filter(x => !x.sc) })) }); }
 function textoWhats(rd, cfg) {
+  rd = soCobradas(rd);
   const L = [];
   L.push(`*Relatório de aulas — ${rd.conta.nome}*`, `Período: ${rd.periodoTxt}`, '');
-  for (const t of rd.tabelas) {
+  if (rd.livre) { if (rd.livre.titulo) L.splice(1, 0, rd.livre.titulo); for (const x of rd.livre.linhas) L.push((x.data ? brShort(x.data) + ' – ' : '') + x.desc + (x.valor ? ': ' + fmt(x.valor) : '')); }
+  else for (const t of rd.tabelas) {
     const nome = rd.tabelas.length > 1 ? t.nome + ': ' : `Aulas (${t.datas.length}): `;
     L.push(nome + (t.datas.map(x => brShort(x.d) + (x.sc ? ' (sem cobrança)' : '')).join(', ') || '—'));
   }
   L.push('');
   if (rd.pres) L.push(`Presença: ${rd.pres.nPres} de ${rd.pres.nPrev} aulas previstas = ${pctTxt(rd.pres.pct)}`);
-  for (const it of rd.itens) L.push(it.tipo === 'aulas' ? `${rd.tabelas.length > 1 ? it.desc : 'Aulas'}: ${it.aulas} × ${fmt(rd.preco)} = ${fmt(it.valor)}` : `${it.desc}: ${fmt(it.valor)}`);
+  for (const it of rd.itens) if (it.tipo !== 'livre') L.push(it.tipo === 'aulas' ? `${rd.tabelas.length > 1 ? it.desc : 'Aulas'}: ${it.aulas} × ${fmt(rd.preco)} = ${fmt(it.valor)}` : `${it.desc}: ${fmt(it.valor)}`);
   L.push(`*Total: ${fmt(rd.total)}*`);
   for (const n of rd.notas) L.push(n);
   const ant = linhasResumoAnterior(rd); if (ant.length) { L.push(''); ant.forEach(x => L.push(x.t)); }
@@ -1224,8 +1231,20 @@ function vRel() {
   let h = `<div class="card pad" style="margin-top:6px"><label class="lbl" for="selConta">Aluno</label><select id="selConta">${at.map(x => `<option value="${x.id}" ${x.id === conta.id ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select>
     <div class="nav"><button data-act="cicloPrev" aria-label="Ciclo anterior">‹</button><div><b class="num">${brShort(rel.ini)} – ${brShort(rel.fim)}</b><small>${ESTILOS[conta.estilo].nome} · ${fmt(rd.preco)} por aula${S.relSalvo ? ' · relatório já gerado' : ''}</small></div><button data-act="cicloNext" aria-label="Próximo ciclo">›</button></div><div class="btns" style="margin-top:10px"><button class="btn sm" data-act="recarregar">↻ Recarregar dados</button></div></div>`;
 
+  // relatório livre
+  { const lv = rel.livre && rel.livre.ativo ? rel.livre : null;
+    h += `<h2>Relatório livre</h2><div class="card pad stack"><label class="sw"><input type="checkbox" id="chkLivre" ${lv ? 'checked' : ''}> Escrever este relatório à mão (caso fora do padrão)</label>`;
+    if (lv) {
+      h += `<p class="muted" style="margin:0;font-size:13px">A tabela de datas do PDF é substituída pelas linhas abaixo. A conferência do ciclo anterior continua valendo: aulas a repor ou a mais aparecem mais abaixo, e você escolhe descontar ou acrescentar. O total entra no Salário.</p>
+      <div><label class="lbl" for="livTit">Título (opcional, no lugar de “Relatório de aulas”)</label><input id="livTit" value="${esc(lv.titulo || '')}" placeholder="Ex.: Acordo de reposição, nov/2026" aria-label="Título do relatório livre"></div>`;
+      (lv.linhas || []).forEach((x, i) => { h += `<div class="blk"><label class="lbl">Linha ${i + 1}</label><textarea rows="2" data-lv="${i}" data-f="desc" placeholder="Descrição (ex.: 5 aulas de 03 a 17/11 conforme combinado)" aria-label="Descrição da linha ${i + 1}">${esc(x.desc || '')}</textarea><div class="grid2" style="margin-top:6px"><input type="date" data-lv="${i}" data-f="data" value="${esc(x.data || '')}" aria-label="Data da linha ${i + 1} (opcional)"><input type="number" inputmode="decimal" step="0.01" data-lv="${i}" data-f="valor" value="${x.valor === '' || x.valor == null ? '' : esc(String(x.valor))}" placeholder="Valor (R$)" aria-label="Valor da linha ${i + 1}"></div><div class="btns" style="margin-top:6px"><button class="btn sm" data-act="rmLinhaLivre" data-i="${i}">Remover linha</button></div></div>`; });
+      h += `<div class="btns"><button class="btn sm pri" data-act="addLinhaLivre">+ Adicionar linha</button></div><small>Data é opcional. Valor negativo vale como desconto. Taxa de academia não entra sozinha: escreva-a como uma linha, se quiser.</small>`;
+    }
+    h += `</div>`; }
+
   // aulas
-  h += `<h2>Aulas</h2><div class="card pad">`;
+  h += `<h2>${rd.livre ? 'Aulas (só para a conferência do próximo ciclo)' : 'Aulas'}</h2><div class="card pad">`;
+  if (rd.livre) h += `<div class="note" style="margin-bottom:12px">Estas datas <b>não aparecem no PDF</b> e não geram valor. Elas só valem como “aulas pagas” na conferência do próximo ciclo. Ajuste se este relatório cobriu outras aulas.</div>`;
   h += `<p class="muted" style="margin:0 0 12px;font-size:13px">${pagaDepois ? 'Aulas dadas, lidas da agenda salva.' : 'Aulas previstas. Onde há agenda salva vale a agenda; nos outros dias valem os dias fixos.'} ${pagaDepois ? 'Toque na data para tirar a cobrança. O × remove.' : 'Toque na data para <b>tirar do relatório</b> (aluno vai faltar). O R$0 mantém a data, mas sem cobrar.'}</p>`;
   if (pagaDepois) { const lac = lacunas(rel.ini, rel.fim, c.idx, S.hoje); if (lac.length) h += `<div class="note acc" style="margin-bottom:12px"><b>Sem agenda salva em:</b> ${lac.map(l => l[0] === l[1] ? brShort(l[0]) : brShort(l[0]) + '–' + brShort(l[1])).join(', ')}. Cole essas semanas ou adicione as datas à mão.</div>`; }
   if (!pagaDepois && conta.membros.length > 1) h += `<div class="blk">${blocoIA(conta, rel, conta.membros.map((_, i) => i), 'all')}</div>`;
@@ -1242,7 +1261,7 @@ function vRel() {
 
   // valores
   h += `<h2>Valores</h2><div class="card pad">`;
-  if (conta.taxa) h += `<label class="sw"><input type="checkbox" id="chkTaxa" ${rel.taxaAtiva ? 'checked' : ''}> Incluir ${esc(conta.taxaDesc || 'taxa de academia')} (${fmt(conta.taxa)})</label>`;
+  if (conta.taxa && !rd.livre) h += `<label class="sw"><input type="checkbox" id="chkTaxa" ${rel.taxaAtiva ? 'checked' : ''}> Incluir ${esc(conta.taxaDesc || 'taxa de academia')} (${fmt(conta.taxa)})</label>`;
   h += `<div class="blk" style="${conta.taxa ? '' : 'border:0;padding:0;margin:0'}"><span class="lbl">Ajustes (use valor negativo para desconto)</span>
     ${(rel.ajustes || []).map((a, i) => `<div class="row" style="padding:8px 0"><div class="main"><b>${esc(a.desc)}</b></div><span class="valor">${fmt(a.valor)}</span><button class="btn sm" data-act="rmAjuste" data-i="${i}" aria-label="Remover ajuste">×</button></div>`).join('')}
     <div class="grid2" style="margin-top:6px"><input id="ajDesc" placeholder="Descrição" aria-label="Descrição do ajuste"><input id="ajVal" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)" aria-label="Valor do ajuste"></div>
@@ -1291,13 +1310,17 @@ function vRel() {
 // ---------- prévia HTML (espelha o PDF) ----------
 function segsHTML(l) { return l.map(s => s.b ? `<b>${esc(s.t)}</b>` : esc(s.t)).join(''); }
 function previaHTML(rd) {
+  rd = soCobradas(rd);
   const ant = linhasResumoAnterior(rd);
   const tabela = t => `<table><thead><tr><th>Data</th><th>Dia da Semana</th></tr></thead><tbody>${t.datas.map(x => `<tr><td>${br(x.d)}</td><td>${x.dia}${x.sc ? ' (sem cobrança)' : ''}</td></tr>`).join('')}</tbody></table>`;
   const pair = rd.layout === 'pair';
   let h = '<div class="paper">';
   h += pair ? `<div class="hdp"><img src="${LOGO}" alt="FMG"><div><strong>FERNANDO MARCONDES GRACIANO</strong><span>PERSONAL TRAINER</span></div></div><hr>` : `<img src="${LOGO}" alt="FMG"><hr>`;
-  h += `<h4>RELATÓRIO DE AULAS</h4><p class="per">Período: ${rd.periodoTxt}</p>`;
-  if (pair) {
+  h += `<h4>${rd.livre && rd.livre.titulo ? esc(rd.livre.titulo.toUpperCase()) : 'RELATÓRIO DE AULAS'}</h4><p class="per">Período: ${rd.periodoTxt}</p>`;
+  const tabLivre = L => `<table><thead><tr><th style="width:19%">Data</th><th>Descrição</th><th style="width:24%">Valor</th></tr></thead><tbody>${L.map(x => `<tr><td>${x.data ? br(x.data) : '–'}</td><td style="text-align:left;white-space:pre-wrap">${esc(x.desc)}</td><td>${x.valor ? fmt(x.valor) : '–'}</td></tr>`).join('')}</tbody></table>`;
+  if (rd.livre) {
+    h += `<div class="alu">${esc(rd.rotulo)}</div>${rd.livre.linhas.length ? tabLivre(rd.livre.linhas) : ''}` + rd.linhas.map(l => `<div class="bar">${segsHTML(l)}</div>`).join('');
+  } else if (pair) {
     h += `<div class="cols c2">${rd.tabelas.map((t, i) => `<div><div class="alu">${esc(t.nome)}</div>${tabela(t)}<div class="bar sub">Subtotal: ${fmt(rd.itens[i].valor)} (${rd.itens[i].aulas} aulas x ${fmt(rd.preco)})</div></div>`).join('')}</div>`;
     h += `<table style="margin-top:10px"><thead><tr><th style="text-align:left">Descrição</th><th>Aulas</th><th>Valor</th></tr></thead><tbody>${rd.itens.map(i => `<tr><td style="text-align:left">${esc(i.desc)}</td><td>${i.aulas ?? '–'}</td><td>${fmt(i.valor)}</td></tr>`).join('')}</tbody></table>`;
   } else {
@@ -1336,15 +1359,32 @@ function pdfRodape(doc, cfg, W, y, size) {
   doc.setFont('helvetica', 'normal'); doc.setTextColor(...COR.dark); doc.text(cfg.assinatura, W / 2, y + size, { align: 'center' });
 }
 function pdfSingle(doc, rd, cfg, k) {
+  rd = soCobradas(rd);
   const W = 595.28, H = 841.89, mx = 56.69, top = 42.52, bot = 42.52, cw = W - 2 * mx; let y = top;
   const ensure = h => { if (y + h > H - bot) { doc.addPage(); y = top; } };
   const lw = cw * .72, lh = lw * LOGO_H / LOGO_W;
   doc.addImage(LOGO, 'JPEG', (W - lw) / 2, y, lw, lh); y += lh + 9.9 * k;
   doc.setDrawColor(...COR.orange); doc.setLineWidth(1.5); doc.line(mx, y, mx + cw, y); y += 1.5 + 11.3 * k;
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(...COR.dark); doc.text('RELATÓRIO DE AULAS', W / 2, y + 17, { align: 'center' }); y += 28;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(...COR.dark); if (rd.livre && rd.livre.titulo) pdfFit(doc, rd.livre.titulo.toUpperCase(), W / 2, y + 17, cw, 20, true, 'center'); else doc.text('RELATÓRIO DE AULAS', W / 2, y + 17, { align: 'center' }); y += 28;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.text('Período: ' + rd.periodoTxt, W / 2, y + 9, { align: 'center' }); y += 12 + 6 * k;
   y += 8 * k; doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text(rd.rotulo, mx, y + 9); y += 13.2 + 4;
   const rh = 21.26 * k, c1 = cw / 2, t = rd.tabelas[0];
+  if (rd.livre) {
+    if (rd.livre.linhas.length) {
+      const w1 = cw * .19, w3 = cw * .24, w2 = cw - w1 - w3;
+      ensure(rh * 2);
+      doc.setFillColor(...COR.orange); doc.setDrawColor(...COR.grid); doc.setLineWidth(.5); doc.rect(mx, y, cw, rh, 'FD');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...COR.white); doc.text('Data', mx + w1 / 2, y + rh / 2 + 3.5, { align: 'center' }); doc.text('Descrição', mx + w1 + w2 / 2, y + rh / 2 + 3.5, { align: 'center' }); doc.text('Valor', mx + w1 + w2 + w3 / 2, y + rh / 2 + 3.5, { align: 'center' }); y += rh;
+      rd.livre.linhas.forEach((x, i) => {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+        const ls = doc.splitTextToSize(x.desc || ' ', w2 - 12), h = Math.max(rh, ls.length * 12 * k + 9 * k);
+        ensure(h); doc.setFillColor(...(i % 2 === 0 ? COR.light : COR.white)); doc.setDrawColor(...COR.grid); doc.rect(mx, y, cw, h, 'FD'); doc.line(mx + w1, y, mx + w1, y + h); doc.line(mx + w1 + w2, y, mx + w1 + w2, y + h);
+        doc.setTextColor(...COR.dark); doc.text(x.data ? br(x.data) : '–', mx + w1 / 2, y + 14 * k, { align: 'center' });
+        ls.forEach((l, j) => doc.text(l, mx + w1 + 6, y + 14 * k + j * 12 * k));
+        doc.text(x.valor ? fmt(x.valor) : '–', mx + w1 + w2 + w3 / 2, y + 14 * k, { align: 'center' }); y += h;
+      });
+    }
+  } else {
   ensure(rh * 2);
   doc.setFillColor(...COR.orange); doc.setDrawColor(...COR.grid); doc.setLineWidth(.5); doc.rect(mx, y, cw, rh, 'FD');
   doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(...COR.white); doc.text('Data', mx + c1 / 2, y + rh / 2 + 3.5, { align: 'center' }); doc.text('Dia da Semana', mx + c1 * 1.5, y + rh / 2 + 3.5, { align: 'center' }); y += rh;
@@ -1352,6 +1392,7 @@ function pdfSingle(doc, rd, cfg, k) {
     ensure(rh); doc.setFillColor(...(i % 2 === 0 ? COR.light : COR.white)); doc.setDrawColor(...COR.grid); doc.rect(mx, y, cw, rh, 'FD'); doc.line(mx + c1, y, mx + c1, y + rh);
     doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(...COR.dark); doc.text(br(x.d), mx + c1 / 2, y + rh / 2 + 3.5, { align: 'center' }); doc.text(x.dia + (x.sc ? ' (sem cobrança)' : ''), mx + c1 * 1.5, y + rh / 2 + 3.5, { align: 'center' }); y += rh;
   });
+  }
   y += 5.7 * k;
   const barra = (h, bg) => { ensure(h); doc.setFillColor(...bg); doc.rect(mx, y, cw, h, 'F'); };
   for (const l of rd.linhas) { const h = 26 * k; barra(h, COR.light); pdfSegs(doc, l, mx + 12, y + h / 2 + 3.5, 10); y += h + 4 * k; }
@@ -1362,6 +1403,7 @@ function pdfSingle(doc, rd, cfg, k) {
   y += 42.5 * k; ensure(60); pdfRodape(doc, cfg, W, y, 9);
 }
 function pdfPair(doc, rd, cfg, k) {
+  rd = soCobradas(rd);
   const W = 595.28, H = 841.89, mx = 56.69, top = 28.35, bot = 28.35, cw = W - 2 * mx; let y = top;
   const ensure = h => { if (y + h > H - bot) { doc.addPage(); y = top; } };
   const lh = 40, lw = lh * LOGO_W / LOGO_H;
@@ -1570,6 +1612,8 @@ document.addEventListener('click', async ev => {
       case 'avisoRm': { const c = contaDe(S.relContaId), m = S.rel.membros[+d.m]; m.faltas = (m.faltas || []).filter(x => x !== d.d); replanejar(c, S.rel, ctx().idx); render(); break; }
       case 'toggleConf': { const k = d.m + '|' + d.d, s = new Set(S.rel.ignorarConf || []); s.has(k) ? s.delete(k) : s.add(k); S.rel.ignorarConf = [...s]; render(); break; }
       case 'toggleDisp': { const s = new Set(S.rel.dispensadas || []); s.has(d.d) ? s.delete(d.d) : s.add(d.d); S.rel.dispensadas = [...s].sort(); render(); break; }
+      case 'addLinhaLivre': { const lv = S.rel.livre; if (lv) { lv.linhas = [...(lv.linhas || []), { desc: '', data: '', valor: '' }]; render(); } break; }
+      case 'rmLinhaLivre': { const lv = S.rel.livre; if (lv) { lv.linhas = (lv.linhas || []).filter((_, k) => k !== +d.i); render(); } break; }
       case 'addAjuste': { const desc = $('#ajDesc').value.trim(), v = Number($('#ajVal').value); if (!desc || !v) { toast('Informe descrição e valor'); break; } S.rel.ajustes = [...(S.rel.ajustes || []), { desc, valor: v }]; render(); break; }
       case 'rmAjuste': S.rel.ajustes.splice(+d.i, 1); render(); break;
       case 'decisao': S.rel.decisao = d.v || null; render(); break;
@@ -1607,6 +1651,9 @@ function addImpFiles(files) {
 document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.dataset && t.dataset.vn !== undefined) { const k = t.dataset.vn, ym = k.slice(0, 7), val = t.value.trim(); velSalvar(ym, x => { if (val === '') delete x.ajustes[k]; else x.ajustes[k] = Math.max(0, Math.round(+val)); }); return; }
+  if (t.id === 'chkLivre' && S.rel) { const lv = S.rel.livre; if (lv) lv.ativo = t.checked; else S.rel.livre = { ativo: t.checked, titulo: '', linhas: [{ desc: '', data: '', valor: '' }] }; if (t.checked && !(S.rel.livre.linhas || []).length) S.rel.livre.linhas = [{ desc: '', data: '', valor: '' }]; render(); return; }
+  if (t.id === 'livTit' && S.rel && S.rel.livre) { S.rel.livre.titulo = t.value; render(); return; }
+  if (t.dataset && t.dataset.lv !== undefined && S.rel && S.rel.livre) { const x = (S.rel.livre.linhas || [])[+t.dataset.lv]; if (x) { x[t.dataset.f] = t.dataset.f === 'valor' ? (t.value === '' ? '' : Number(t.value)) : t.value; render(); } return; }
   if (t.id === 'obsRel' && S.rel) { S.rel.observacao = t.value; render(); return; }
   if (t.id === 'txtResumo' && S.rel) { S.rel.textoResumo = t.value; render(); return; }
   if (t.id === 'obsVel') { const ym = velMesAtual(), val = t.value; velSalvar(ym, x => { x.obs = val; }); return; }
