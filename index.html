@@ -271,6 +271,8 @@ body.arrastando .dropzone { border-color: var(--acc); background: var(--acc-soft
 body.arrastando .dropzone b { color: var(--acc-text); }
 @media (pointer: coarse) { .dropzone b { font-size: 15px; } }
 
+body.oculta input[inputmode=decimal]:not(:focus) { filter: blur(6px); }
+.btn.olho { padding: 4px 10px; min-height: 0; display: inline-flex; align-items: center; }
 </style>
 <div class="wrap">
   <header class="top">
@@ -589,7 +591,7 @@ function linhasResumoAnterior(rd) {
   if (custom) return custom.split(/\n+/).map(t => t.trim()).filter(Boolean).map(t => ({ t }));
   const p = resumoPadrao(rd); return p ? [{ t: p }] : [];
 }
-function soCobradas(rd) { return Object.assign({}, rd, { tabelas: rd.tabelas.map(t => Object.assign({}, t, { datas: t.datas.filter(x => !x.sc) })) }); }
+function soCobradas(rd) { return rd; }
 function textoWhats(rd, cfg) {
   rd = soCobradas(rd);
   const L = [];
@@ -674,7 +676,7 @@ function textoVelocity(v) {
 // ---------- Salário mensal: soma dos relatórios (ciclos) + Velocity, mês a mês ----------
 // modo 'recebimento': quem paga antes (estilo 2) conta no mês em que o ciclo começa; os demais no mês em que ele termina.
 // modo 'fim': todo ciclo conta no mês em que termina.
-function mesDaFatura(f, conta, modo) { return (modo !== 'fim' && conta && conta.estilo === 2 ? f.ini : f.fim).slice(0, 7); }
+function mesDaFatura(f, conta, modo) { if (modo !== 'fim' && f.pagoEm) return f.pagoEm.slice(0, 7); return (modo !== 'fim' && conta && conta.estilo === 2 ? f.ini : f.fim).slice(0, 7); }
 function salarioMes(ym, o) {
   const { faturas, contas, semanas, velocity, modo } = o; const itens = [];
   for (const f of Object.values(faturas || {})) {
@@ -1030,27 +1032,98 @@ function impCard() {
   if (S.imp.length) h += `<div class="btns" style="margin-top:12px"><button class="btn pri" data-act="impGuardar" ${S.impSalvando ? 'disabled' : ''}>${S.impSalvando ? 'Guardando…' : `Guardar ${S.imp.length} PDF${S.imp.length > 1 ? 's' : ''} no Arquivo`}</button></div>`;
   return h + '</div></details>';
 }
+function arqLista() {
+  return Object.entries(S.faturas).map(([id, f]) => ({ ...f, id })).filter(f => f.pdfId).concat(S.arquivados.filter(x => x.pdfId));
+}
 function vArquivo() {
   const nomes = {}; S.contas.forEach(c => nomes[c.id] = c);
-  const fs = Object.entries(S.faturas).map(([id, f]) => ({ ...f, id })).filter(f => f.pdfId).concat(S.arquivados.filter(x => x.pdfId));
+  const fs = arqLista();
   let h = impCard();
-  if (!fs.length) return h + vazio('Nenhum PDF guardado ainda', 'Quando você gerar um relatório em PDF, ele fica guardado aqui, separado por aluno e mês.', '');
-  const ids = [...new Set(fs.map(f => f.contaId))].sort((x, y) => ((nomes[x] || {}).ordem || 99) - ((nomes[y] || {}).ordem || 99) || String(x).localeCompare(String(y)));
-  h += '<h2>Arquivo de relatórios</h2>';
-  for (const cid of ids) {
-    const lista = fs.filter(f => f.contaId === cid).sort((x, y) => y.ini.localeCompare(x.ini) || String(x.arquivo).localeCompare(String(y.arquivo)));
-    const anos = [...new Set(lista.map(f => f.ini.slice(0, 4)))].sort().reverse();
-    h += `<details class="arq card" ${S.arqAberto === cid ? 'open' : ''} data-conta="${esc(cid)}"><summary><b>${esc((nomes[cid] || {}).nome || lista[0].nome)}</b><span class="cnt">${lista.length} PDF</span></summary>`;
+  if (!fs.length) return h + vazio('Nenhum PDF guardado ainda', 'Quando você gerar um relatório em PDF, ele fica guardado aqui, separado por ano.', '');
+  const aberto = k => (S.arqOpen && S.arqOpen.has(k)) ? 'open' : '';
+  const inativo = f => (nomes[f.contaId] || {}).ativo === false;
+  const nomeDe = f => (nomes[f.contaId] || {}).nome || f.nome || f.contaId;
+  const ordC = f => (nomes[f.contaId] || {}).ordem || 99;
+  const linha = f => `<div class="row"><div class="main"><b>${esc(nomeDe(f))}</b><small>${esc(f.arquivo)}${f.total != null ? ` · ${brShort(f.ini)} – ${brShort(f.fim)} · ${fmt(f.total)}` : ' · importado'}</small></div><button class="btn sm" data-act="abrirPdf" data-id="${esc(f.id)}">Abrir</button><button class="btn sm" data-act="baixarPdf" data-id="${esc(f.id)}">Baixar</button><button class="btn sm dng" data-act="delFatura" data-id="${esc(f.id)}">${S.confirma === 'fat' + f.id ? 'Excluir mesmo?' : 'Excluir'}</button></div>`;
+  const porAno = (lista, pref) => {
+    const anos = [...new Set(lista.map(f => f.ini.slice(0, 4)))].sort().reverse(); let o = '';
     for (const ano of anos) {
-      h += `<div class="arq-ano">${ano}</div>`;
-      for (const f of lista.filter(x => x.ini.startsWith(ano))) {
-        const m = +f.ini.slice(5, 7) - 1;
-        h += `<div class="row"><div class="main"><b>${MESES[m]}/${ano}</b><small>${esc(f.arquivo)}${f.total != null ? ` · ${brShort(f.ini)} – ${brShort(f.fim)} · ${fmt(f.total)}` : ' · importado'}</small></div><button class="btn sm" data-act="abrirPdf" data-id="${esc(f.id)}">Abrir</button><button class="btn sm" data-act="baixarPdf" data-id="${esc(f.id)}">Baixar</button><button class="btn sm dng" data-act="delFatura" data-id="${esc(f.id)}">${S.confirma === 'fat' + f.id ? 'Excluir mesmo?' : 'Excluir'}</button></div>`;
+      const doAno = lista.filter(f => f.ini.startsWith(ano)), ms = [...new Set(doAno.map(f => f.ini.slice(5, 7)))].sort().reverse();
+      o += `<details class="arq card" ${aberto(pref + ano)} data-k="${pref}${ano}"><summary><b>${ano}</b><span class="cnt">${doAno.length} PDF</span></summary>`;
+      for (const m of ms) {
+        o += `<div class="arq-ano">${MESES[+m - 1]}</div>`;
+        o += doAno.filter(f => f.ini.slice(5, 7) === m).sort((x, y) => ordC(x) - ordC(y) || nomeDe(x).localeCompare(nomeDe(y)) || String(x.arquivo).localeCompare(String(y.arquivo))).map(linha).join('');
       }
+      o += '</details>';
+    }
+    return o;
+  };
+  h += `<div class="btns" style="margin-top:12px"><button class="btn" data-act="expAbrir">Exportar relatórios…</button></div>`;
+  const ativosL = fs.filter(f => !inativo(f)), inat = fs.filter(inativo);
+  h += '<h2>Arquivo de relatórios</h2>' + (porAno(ativosL, 'a') || '<div class="card pad"><small>Nenhum PDF de aluno ativo.</small></div>');
+  if (inat.length) {
+    const cids = [...new Set(inat.map(f => f.contaId))].sort((x, y) => String(nomes[x] && nomes[x].nome).localeCompare(String(nomes[y] && nomes[y].nome)));
+    h += `<h2>Inativos</h2><details class="arq card" ${aberto('inat')} data-k="inat"><summary><b>Alunos inativos</b><span class="cnt">${inat.length} PDF</span></summary>`;
+    for (const cid of cids) {
+      const l = inat.filter(f => f.contaId === cid);
+      h += `<details class="arq card" ${aberto('i:' + cid)} data-k="i:${esc(cid)}" style="margin:8px"><summary><b>${esc((nomes[cid] || {}).nome || cid)}</b><span class="cnt">${l.length} PDF</span></summary><div class="btns" style="padding:0 14px 10px"><button class="btn sm pri" data-act="reativarAluno" data-id="${esc(cid)}">Reativar aluno</button></div>${porAno(l, 'i:' + cid + ':')}</details>`;
     }
     h += '</details>';
   }
   return h;
+}
+
+// ---------- exportar relatórios (zip) ----------
+const crcTab = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u8) { let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = crcTab[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipSimples(arqs) {
+  const enc = new TextEncoder(), partes = [], central = []; let off = 0;
+  const agora = new Date(), dt = ((agora.getHours() << 11) | (agora.getMinutes() << 5) | (agora.getSeconds() >> 1)) & 0xFFFF, dd = (((agora.getFullYear() - 1980) << 9) | ((agora.getMonth() + 1) << 5) | agora.getDate()) & 0xFFFF;
+  for (const a of arqs) {
+    const nome = enc.encode(a.nome), crc = crc32(a.data), tam = a.data.length;
+    const lh = new DataView(new ArrayBuffer(30)); lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true); lh.setUint16(8, 0, true); lh.setUint16(10, dt, true); lh.setUint16(12, dd, true); lh.setUint32(14, crc, true); lh.setUint32(18, tam, true); lh.setUint32(22, tam, true); lh.setUint16(26, nome.length, true); lh.setUint16(28, 0, true);
+    partes.push(new Uint8Array(lh.buffer), nome, a.data);
+    const ch = new DataView(new ArrayBuffer(46)); ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true); ch.setUint16(8, 0x0800, true); ch.setUint16(10, 0, true); ch.setUint16(12, dt, true); ch.setUint16(14, dd, true); ch.setUint32(16, crc, true); ch.setUint32(20, tam, true); ch.setUint32(24, tam, true); ch.setUint16(28, nome.length, true); ch.setUint32(42, off, true);
+    central.push(new Uint8Array(ch.buffer), nome); off += 30 + nome.length + tam;
+  }
+  const tamC = central.reduce((t, x) => t + x.length, 0), fim = new DataView(new ArrayBuffer(22));
+  fim.setUint32(0, 0x06054b50, true); fim.setUint16(8, arqs.length, true); fim.setUint16(10, arqs.length, true); fim.setUint32(12, tamC, true); fim.setUint32(16, off, true);
+  return new Blob([...partes, ...central, new Uint8Array(fim.buffer)], { type: 'application/zip' });
+}
+function expIniciar() {
+  const fs = arqLista(), yms = fs.map(f => f.ini.slice(0, 7)).sort();
+  S.exp = { sel: new Set(fs.map(f => f.contaId)), de: yms[0] || S.hoje.slice(0, 7), ate: yms[yms.length - 1] || S.hoje.slice(0, 7) };
+}
+function expSelecionados() {
+  const e = S.exp; return arqLista().filter(f => e.sel.has(f.contaId) && f.ini.slice(0, 7) >= e.de && f.ini.slice(0, 7) <= e.ate).sort((a, b) => a.ini.localeCompare(b.ini) || String(a.nome).localeCompare(String(b.nome)));
+}
+function vExport() {
+  const e = S.exp, fs = arqLista(), nomes = {}; S.contas.forEach(c => nomes[c.id] = c);
+  const ids = [...new Set(fs.map(f => f.contaId))].sort((x, y) => (((nomes[x] || {}).ordem || 99) - ((nomes[y] || {}).ordem || 99)) || String(x).localeCompare(String(y)));
+  const lista = expSelecionados(), okMes = v => /^\d{4}-\d{2}$/.test(v);
+  return `<div class="in"><div class="hd"><h3>Exportar relatórios</h3><button class="btn sm" data-act="sheetFechar">Fechar</button></div><div class="stack">
+  <div class="card pad"><span class="lbl">Alunos</span><div class="btns" style="margin-bottom:8px"><button class="btn sm" data-act="expTodos" data-v="1">Todos</button><button class="btn sm" data-act="expTodos" data-v="0">Nenhum</button></div>
+    ${ids.map(id => `<label class="sw"><input type="checkbox" data-exp="${esc(id)}" ${e.sel.has(id) ? 'checked' : ''}> ${esc((nomes[id] || {}).nome || (fs.find(f => f.contaId === id) || {}).nome || id)}${(nomes[id] || {}).ativo === false ? ' <small>(inativo)</small>' : ''} <small>· ${fs.filter(f => f.contaId === id).length} PDF</small></label>`).join('')}</div>
+  <div class="card pad"><span class="lbl">Período (por mês, pelo início do ciclo)</span><div class="grid2"><div><label class="lbl" for="expDe">De</label><input type="month" id="expDe" value="${esc(e.de)}" placeholder="2026-01"></div><div><label class="lbl" for="expAte">Até</label><input type="month" id="expAte" value="${esc(e.ate)}" placeholder="2026-12"></div></div>${okMes(e.de) && okMes(e.ate) ? '' : '<small style="color:var(--bad)">Use o formato aaaa-mm (ex.: 2026-03).</small>'}</div>
+  <div class="note"><b>${lista.length}</b> PDF${lista.length === 1 ? '' : 's'} nesta seleção.</div>
+  <div class="btns"><button class="btn pri" data-act="expGerar" ${lista.length ? '' : 'disabled'}>Exportar em um arquivo .zip</button></div></div></div>`;
+}
+async function expGerar() {
+  const lista = expSelecionados(); if (!lista.length) return;
+  toast(`Preparando ${lista.length} PDF${lista.length > 1 ? 's' : ''}…`);
+  const arqs = [], usados = new Set(); let falhas = 0;
+  for (const f of lista) {
+    try {
+      const buf = await baixarArquivo(f); let nome = String(f.arquivo || `${f.nome || 'Relatorio'}_${f.ini}.pdf`).replace(/[\\/:*?"<>|]/g, '_');
+      if (!/\.pdf$/i.test(nome)) nome += '.pdf'; while (usados.has(nome.toLowerCase())) nome = nome.replace(/\.pdf$/i, '_2.pdf'); usados.add(nome.toLowerCase());
+      arqs.push({ nome, data: new Uint8Array(buf) });
+    } catch (e) { falhas++; }
+  }
+  if (!arqs.length) { toast('Não consegui baixar os PDFs. Tente de novo.'); return; }
+  const blob = zipSimples(arqs), unicos = new Set(lista.map(f => f.contaId));
+  const nomeZip = `Relatorios_FMG_${unicos.size === 1 ? (String(lista[0].arquivo || '').split('_')[1] || 'aluno') + '_' : ''}${S.exp.de}_a_${S.exp.ate}.zip`;
+  try { const dl = await Plat.use('downloads'); await dl.save({ filename: nomeZip, data: blob }); toast(`${arqs.length} PDF${arqs.length > 1 ? 's' : ''} exportado${arqs.length > 1 ? 's' : ''}${falhas ? ` (${falhas} falharam)` : ''}`); }
+  catch (e) { toast('Não consegui salvar o arquivo.'); }
 }
 
 async function baixarArquivo(f) {
@@ -1126,11 +1199,11 @@ async function guardarImportados() {
 }
 function vAlunos() {
   const g = S.config;
-  const linha = c => `<div class="row" data-act="alunoEdit" data-id="${c.id}"><div class="main"><b>${esc(c.nome)}</b><small>${fmt(c.preco)}${c.estilo === 4 ? ' / ' + fmt(c.precoBaixo) : ''} · ${c.membros.map(m => m.dias.map(d => DIAS_CURTO[d]).join(' ')).filter((v, i, a) => a.indexOf(v) === i).join(' | ')} · ciclo ${c.ciclo === '1-fim' ? '1 ao fim' : '20 a 19'}</small></div><span class="chip">${ESTILOS[c.estilo].nome}</span></div>`;
+  const linha = c => `<div class="row" data-act="alunoEdit" data-id="${c.id}"><div class="main"><b>${esc(c.nome)}</b><small>${fmt(c.preco)}${c.estilo === 4 ? ' / ' + fmt(c.precoBaixo) : ''} · ${c.membros.map(m => m.dias.map(d => DIAS_CURTO[d]).join(' ')).filter((v, i, a) => a.indexOf(v) === i).join(' | ')} · ciclo ${c.ciclo === '1-fim' ? '1 ao fim' : '20 a 19'}</small></div>${c.ativo === false ? `<button class="btn sm pri" data-act="reativarAluno" data-id="${c.id}">Reativar</button>` : `<span class="chip">${ESTILOS[c.estilo].nome}</span>`}</div>`;
   const ativosL = ativos(), off = S.contas.filter(c => c.ativo === false);
   return `<div class="btns" style="margin-top:6px"><button class="btn pri" data-act="alunoNovo">Novo aluno</button></div>
   <h2>Alunos ativos</h2><div class="card">${ativosL.length ? ativosL.map(linha).join('') : '<div class="row"><div class="main muted">Nenhum aluno ativo.</div></div>'}</div>
-  ${off.length ? `<h2>Parados</h2><div class="card">${off.map(linha).join('')}</div>` : ''}
+  ${off.length ? `<h2>Inativos</h2><div class="card">${off.map(linha).join('')}</div><small style="display:block;margin:6px 4px">Aluno inativo sai do Início e dos Relatórios. Os PDFs dele ficam em “Inativos” na aba Arquivo. Nada é apagado.</small>` : ''}
   <h2>Geral</h2><div class="card pad"><div class="field"><label class="lbl" for="cfgIgn">Nomes a ignorar na agenda (separados por vírgula)</label><input id="cfgIgn" value="${esc((g.ignorar || []).join(', '))}"></div>
   <div class="field"><label class="lbl" for="cfgPix">Chave Pix (CNPJ)</label><input id="cfgPix" inputmode="numeric" value="${esc(g.pix)}"></div>
   <div class="field"><label class="lbl" for="cfgAss">Assinatura do relatório</label><input id="cfgAss" value="${esc(g.assinatura)}"></div>
@@ -1142,7 +1215,7 @@ function lerSheet() {
   const c = S.sheet && S.sheet.conta; if (!c || !$('#fNome')) return;
   c.nome = $('#fNome').value.trim(); c.arquivo = $('#fArq').value.trim(); c.rotulo = $('#fRot').value; c.ciclo = $('#fCiclo').value;
   c.preco = Number($('#fPreco').value) || 0; c.taxa = Number($('#fTaxa').value) || 0;
-  c.saldoInicial = -Math.max(0, Math.round(Number($('#fRep').value) || 0)); c.ativo = $('#fAtivo').checked;
+  c.saldoInicial = -Math.max(0, Math.round(Number($('#fRep').value) || 0));
   if (c.estilo === 4) { c.precoBaixo = Number($('#fPreco2').value) || 0; c.limite = (Number($('#fLim').value) || 75) / 100; c.limiteInclusivo = $('#fIncl').checked; }
   c.membros.forEach((m, i) => { m.nome = $(`#mNome${i}`).value.trim(); m.apelidos = $(`#mApe${i}`).value.split(',').map(x => x.trim()).filter(Boolean); });
 }
@@ -1166,7 +1239,7 @@ function vSheetConta() {
       <div class="field"><span class="lbl">Dias fixos</span><div class="dias">${DIAS_CURTO.map((d, di) => `<button type="button" data-act="dia" data-m="${i}" data-d="${di}" aria-pressed="${m.dias.includes(di)}">${d}</button>`).join('')}</div></div>
       ${c.membros.length > 1 ? `<div class="btns" style="margin-top:10px"><button class="btn sm dng" data-act="rmMembro" data-m="${i}">Remover pessoa</button></div>` : ''}</div>`).join('')}
     <div class="btns" style="margin-top:10px"><button class="btn sm" data-act="addMembro">Adicionar pessoa ao mesmo relatório</button></div></div>
-  <div class="card pad"><label class="sw"><input type="checkbox" id="fAtivo" ${c.ativo !== false ? 'checked' : ''}> Aluno ativo</label></div>
+  ${novo ? '' : `<div class="card pad"><span class="lbl">Situação: ${c.ativo === false ? 'inativo' : 'ativo'}</span><div class="btns"><button class="btn" data-act="sheetAtivo">${c.ativo === false ? 'Reativar aluno' : 'Inativar aluno'}</button></div><small style="display:block;margin-top:6px">${c.ativo === false ? 'Reativar devolve o aluno ao Início e aos Relatórios.' : 'Inativar tira o aluno do Início e dos Relatórios e leva os PDFs dele para “Inativos” no Arquivo. Nada é apagado.'}</small></div>`}
   <div class="btns"><button class="btn pri" data-act="sheetSalvar">Salvar</button>${novo ? '' : `<button class="btn dng" data-act="sheetExcluir">${S.confirma === 'conta' ? 'Excluir mesmo?' : 'Excluir aluno'}</button>`}</div></div></div>`;
 }
 function abrirSheet(html) { let s = $('#sheet'); if (!s) { s = document.createElement('div'); s.id = 'sheet'; s.className = 'sheet'; s.setAttribute('role', 'dialog'); s.setAttribute('aria-modal', 'true'); document.body.appendChild(s); } s.innerHTML = html; s.hidden = false; document.documentElement.style.overflow = 'hidden'; }
@@ -1177,11 +1250,13 @@ function renderSheet() { if (S.sheet && S.sheet.conta) { const s = $('#sheet'); 
 const ehPrepago = () => { const c = contaDe(S.relContaId); return !!(c && (c.estilo === 2 || c.estilo === 3)); };
 function abrirRel(contaId, ciclo, forcar) {
   S.prop = null;
+  if (S.rel && !S.relSalvo && S.rel.contaId) { S.rasc = S.rasc || {}; S.rasc[`${S.rel.contaId}_${S.rel.ini}`] = { ajustes: S.rel.ajustes, observacao: S.rel.observacao, livre: S.rel.livre, textoResumo: S.rel.textoResumo }; }
   const conta = contaDe(contaId); if (!conta) return;
   const fat = S.faturas[`${contaId}_${ciclo.ini}`];
   S.relContaId = contaId; S.relCiclo = ciclo;
   S.rel = fat && fat.rel && !forcar ? clone(fat.rel) : novoRel(conta, ciclo, ctx());
   S.relSalvo = !!(fat && fat.rel && !forcar);
+  if (!S.relSalvo && !forcar && S.rasc && S.rasc[`${contaId}_${ciclo.ini}`]) { const r = clone(S.rasc[`${contaId}_${ciclo.ini}`]); for (const k of Object.keys(r)) if (r[k] !== undefined && r[k] !== null) S.rel[k] = r[k]; }
 }
 const chipData = (d, m, sc, pre) => pre
   ? `<span class="dchip ${sc ? 'sc' : ''}"><button data-act="rmData" data-m="${m}" data-d="${d}" title="Tirar esta data do relatório (aluno vai faltar)" aria-label="Tirar ${dtxt(d)} do relatório">${dtxt(d)}${sc ? ' · sem cobrança' : ''}</button><button data-act="toggleSc" data-m="${m}" data-d="${d}" title="Manter a data, mas sem cobrar" aria-label="Aula sem cobrança em ${dtxt(d)}">R$0</button></span>`
@@ -1263,10 +1338,10 @@ function vRel() {
   // valores
   h += `<h2>Valores</h2><div class="card pad">`;
   if (conta.taxa && !rd.livre) h += `<label class="sw"><input type="checkbox" id="chkTaxa" ${rel.taxaAtiva ? 'checked' : ''}> Incluir ${esc(conta.taxaDesc || 'taxa de academia')} (${fmt(conta.taxa)})</label>`;
-  h += `<div class="blk" style="${conta.taxa ? '' : 'border:0;padding:0;margin:0'}"><span class="lbl">Ajustes (use valor negativo para desconto)</span>
-    ${(rel.ajustes || []).map((a, i) => `<div class="row" style="padding:8px 0"><div class="main"><b>${esc(a.desc)}</b></div><span class="valor">${fmt(a.valor)}</span><button class="btn sm" data-act="rmAjuste" data-i="${i}" aria-label="Remover ajuste">×</button></div>`).join('')}
-    <div class="grid2" style="margin-top:6px"><input id="ajDesc" placeholder="Descrição" aria-label="Descrição do ajuste"><input id="ajVal" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)" aria-label="Valor do ajuste"></div>
-    <div class="btns" style="margin-top:8px"><button class="btn sm" data-act="addAjuste">Adicionar ajuste</button></div></div></div>`;
+  h += `<div class="blk" style="${conta.taxa ? '' : 'border:0;padding:0;margin:0'}"><span class="lbl">Taxas extras</span>
+    ${(rel.ajustes || []).map((a, i) => `<div class="row" style="padding:8px 0"><div class="main"><b>${esc(a.desc)}</b></div><span class="valor">${fmt(a.valor)}</span><button class="btn sm dng" data-act="rmAjuste" data-i="${i}" aria-label="Remover ${esc(a.desc)}" title="Remover">−</button></div>`).join('') || '<small>Nenhuma taxa extra.</small>'}
+    <div style="display:grid;grid-template-columns:1fr 104px 44px;gap:6px;margin-top:8px;align-items:center"><input id="ajDesc" placeholder="Motivo" aria-label="Motivo da taxa extra"><input id="ajVal" type="number" inputmode="decimal" step="0.01" placeholder="Valor (R$)" aria-label="Valor da taxa extra"><button class="btn sm pri" data-act="addAjuste" aria-label="Adicionar taxa extra" title="Adicionar" style="padding:6px 0">+</button></div>
+    <small style="display:block;margin-top:6px">Escreva o motivo como quiser. A taxa fica no relatório até você tocar em −.</small></div></div>`;
 
   // observação
   h += `<h2>Observação</h2><div class="card pad"><label class="lbl" for="obsRel">Comentário extra que aparece no relatório (opcional)</label><textarea id="obsRel" rows="3" placeholder="Ex.: Feriado de 15/11 sem aula; reposição combinada para 22/11." aria-label="Observação do relatório">${esc(rel.observacao || '')}</textarea></div>`;
@@ -1503,7 +1578,9 @@ document.addEventListener('click', async ev => {
       case 'noop': break;
       case 'abrir': { const c = contaDe(d.c); if (!c) break; abrirRel(d.c, { ini: d.ini, fim: d.fim }); S.tab = 'rel'; render(true); window.scrollTo(0, 0); break; }
       case 'enviei': ev.stopPropagation(); await enviei(d.c, d.ini, d.fim); break;
-      case 'pago': { const f = S.faturas[d.id]; if (f) await Store.set('faturas', d.id, { ...f, pago: !f.pago }); break; }
+      case 'pago': { const f = S.faturas[d.id]; if (!f) break; if (f.pago) { await Store.set('faturas', d.id, { ...f, pago: false, pagoEm: null }); break; }
+        abrirSheet(`<div class="in"><div class="hd"><h3>Recebimento</h3><button class="btn sm" data-act="sheetFechar">Fechar</button></div><div class="stack"><div class="card pad"><b>${esc(f.nome || '')}</b> · ${brShort(f.ini)} – ${brShort(f.fim)}<div class="field"><label class="lbl" for="pagoData">Data em que o Pix caiu</label><input type="date" id="pagoData" value="${S.hoje}"></div><small>O mês desta data é o mês do Salário em que o relatório conta.</small></div><div class="btns"><button class="btn pri" data-act="pagoOk" data-id="${esc(d.id)}">Confirmar recebimento</button></div></div></div>`); break; }
+      case 'pagoOk': { const f = S.faturas[d.id], v = ($('#pagoData') || {}).value; if (!f) break; if (!/^\d{4}-\d{2}-\d{2}$/.test(v || '')) { toast('Escolha a data'); break; } fecharSheet(); await Store.set('faturas', d.id, { ...f, pago: true, pagoEm: v }); toast('Recebimento registrado'); break; }
       case 'irSemana': S.tab = 'semana'; render(true); break;
       // semana
       case 'toggleFalta': { const ta = $('#agendaTxt'); const L = ta.value.replace(/\r/g, '').split('\n'); const i = Number(d.li); if (L[i] === undefined) break; L[i] = /\(\s*falta\s*\)/i.test(L[i]) ? L[i].replace(/\s*\(\s*falta\s*\)/i, '') : L[i].replace(/\s+$/, '') + ' (falta)'; ta.value = L.join('\n'); S.agendaTxt = ta.value; renderPrevia(); break; }
@@ -1559,7 +1636,11 @@ document.addEventListener('click', async ev => {
       // alunos
       case 'alunoNovo': S.sheet = { conta: novaConta(), novo: true }; renderSheet(); break;
       case 'alunoEdit': { const c = contaDe(d.id); if (c) { S.sheet = { conta: clone(c), novo: false }; renderSheet(); } break; }
+      case 'ocultar': S.ocultar = !S.ocultar; render(); if (S.sheet && S.sheet.conta) renderSheet(); toast(S.ocultar ? 'Valores ocultos' : 'Valores visíveis'); break;
       case 'sheetFechar': fecharSheet(); break;
+      case 'expAbrir': expIniciar(); abrirSheet(vExport()); break;
+      case 'expTodos': { const ids = arqLista().map(f => f.contaId); S.exp.sel = d.v === '1' ? new Set(ids) : new Set(); abrirSheet(vExport()); break; }
+      case 'expGerar': await expGerar(); break;
       case 'estilo': { lerSheet(); const c = S.sheet.conta; c.estilo = Number(el.value); c.ciclo = ESTILOS[c.estilo].ciclo; renderSheet(); break; }
       case 'dia': { lerSheet(); const m = S.sheet.conta.membros[+d.m]; const di = +d.d; m.dias = m.dias.includes(di) ? m.dias.filter(x => x !== di) : [...m.dias, di].sort(); renderSheet(); break; }
       case 'addMembro': lerSheet(); S.sheet.conta.membros.push({ nome: '', apelidos: [], dias: [] }); renderSheet(); break;
@@ -1573,6 +1654,8 @@ document.addEventListener('click', async ev => {
         c.id = c.id || slug(c.nome); if (S.sheet.novo && contaDe(c.id)) c.id += '-' + Date.now().toString(36).slice(-3);
         await Store.set('contas', c.id, c); S.contas = [...S.contas.filter(x => x.id !== c.id), c].sort((x, y) => (x.ordem || 0) - (y.ordem || 0)); fecharSheet(); render(true); await reprocessarSemanas(); toast('Aluno salvo'); break;
       }
+      case 'sheetAtivo': { lerSheet(); const c = S.sheet.conta; c.ativo = c.ativo === false; await Store.set('contas', c.id, c); S.contas = [...S.contas.filter(x => x.id !== c.id), c].sort((x, y) => (x.ordem || 0) - (y.ordem || 0)); fecharSheet(); render(true); toast(c.ativo === false ? 'Aluno inativado' : 'Aluno reativado'); break; }
+      case 'reativarAluno': { const c = contaDe(d.id); if (c) { const n = { ...c, ativo: true }; await Store.set('contas', n.id, n); S.contas = [...S.contas.filter(x => x.id !== n.id), n].sort((x, y) => (x.ordem || 0) - (y.ordem || 0)); render(); toast(n.nome + ' reativado'); } break; }
       case 'sheetExcluir': { if (S.confirma === 'conta') { const id = S.sheet.conta.id; fecharSheet(); await Store.del('contas', id); toast('Aluno excluído'); } else { S.confirma = 'conta'; renderSheet(); } break; }
       case 'lockEsp': Lock.setEspera(+d.v); toast(+d.v === 0 ? 'Vai pedir sempre que você sair do app' : `Vai pedir após ${+d.v === 30 ? '30 segundos' : '5 minutos'} fora do app`); render(); break;
       case 'lockToggle': {
@@ -1615,7 +1698,7 @@ document.addEventListener('click', async ev => {
       case 'toggleDisp': { const s = new Set(S.rel.dispensadas || []); s.has(d.d) ? s.delete(d.d) : s.add(d.d); S.rel.dispensadas = [...s].sort(); render(); break; }
       case 'addLinhaLivre': { const lv = S.rel.livre; if (lv) { lv.linhas = [...(lv.linhas || []), { desc: '', data: '', valor: '' }]; render(); } break; }
       case 'rmLinhaLivre': { const lv = S.rel.livre; if (lv) { lv.linhas = (lv.linhas || []).filter((_, k) => k !== +d.i); render(); } break; }
-      case 'addAjuste': { const desc = $('#ajDesc').value.trim(), v = Number($('#ajVal').value); if (!desc || !v) { toast('Informe descrição e valor'); break; } S.rel.ajustes = [...(S.rel.ajustes || []), { desc, valor: v }]; render(); break; }
+      case 'addAjuste': { const desc = $('#ajDesc').value.trim(), v = Number($('#ajVal').value); if (!desc || !v) { toast('Informe o motivo e o valor'); break; } S.rel.ajustes = [...(S.rel.ajustes || []), { desc, valor: v }]; render(); break; }
       case 'rmAjuste': S.rel.ajustes.splice(+d.i, 1); render(); break;
       case 'decisao': S.rel.decisao = d.v || null; render(); break;
       case 'recalcular': { const ant = S.rel; abrirRel(S.relContaId, S.relCiclo, true); const c = contaDe(S.relContaId); if (c.estilo === 2 || c.estilo === 3) { S.rel.membros.forEach((m, i) => { const o = ant.membros[i]; if (o) { m.dias = o.dias || null; m.faltas = o.faltas || []; m.extras = o.extras || []; } }); replanejar(c, S.rel, ctx().idx); } S.rel.observacao = ant.observacao || ''; S.rel.textoResumo = ant.textoResumo || ''; render(); toast('Datas recalculadas (avisos mantidos)'); break; }
@@ -1652,6 +1735,8 @@ function addImpFiles(files) {
 document.addEventListener('change', ev => {
   const t = ev.target;
   if (t.dataset && t.dataset.vn !== undefined) { const k = t.dataset.vn, ym = k.slice(0, 7), val = t.value.trim(); velSalvar(ym, x => { if (val === '') delete x.ajustes[k]; else x.ajustes[k] = Math.max(0, Math.round(+val)); }); return; }
+  if (t.dataset && t.dataset.exp !== undefined && S.exp) { if (t.checked) S.exp.sel.add(t.dataset.exp); else S.exp.sel.delete(t.dataset.exp); const sh = $('#sheet'), top = sh ? sh.scrollTop : 0; abrirSheet(vExport()); $('#sheet').scrollTop = top; return; }
+  if ((t.id === 'expDe' || t.id === 'expAte') && S.exp) { S.exp[t.id === 'expDe' ? 'de' : 'ate'] = t.value; const sh = $('#sheet'), top = sh ? sh.scrollTop : 0; abrirSheet(vExport()); $('#sheet').scrollTop = top; return; }
   if (t.id === 'chkLivre' && S.rel) { const lv = S.rel.livre; if (lv) lv.ativo = t.checked; else S.rel.livre = { ativo: t.checked, titulo: '', linhas: [{ desc: '', data: '', valor: '' }] }; if (t.checked && !(S.rel.livre.linhas || []).length) S.rel.livre.linhas = [{ desc: '', data: '', valor: '' }]; render(); return; }
   if (t.id === 'livTit' && S.rel && S.rel.livre) { S.rel.livre.titulo = t.value; render(); return; }
   if (t.dataset && t.dataset.lv !== undefined && S.rel && S.rel.livre) { const x = (S.rel.livre.linhas || [])[+t.dataset.lv]; if (x) { x[t.dataset.f] = t.dataset.f === 'valor' ? (t.value === '' ? '' : Number(t.value)) : t.value; render(); } return; }
@@ -1743,12 +1828,11 @@ async function velPdf() {
 
 // ---------- Salário mensal ----------
 const salModo = () => (S.config && S.config.salarioModo) === 'fim' ? 'fim' : 'recebimento';
-const salOpts = () => ({ faturas: S.faturas, contas: S.contas, semanas: S.semanas, velocity: S.velocity, modo: salModo() });
+const salOpts = () => ({ faturas: S.faturas, contas: S.contas, semanas: S.semanas, velocity: S.velocity, modo: 'recebimento' });
 const salMesAtual = () => S.salMes || S.hoje.slice(0, 7);
 const salAnoAtual = () => S.salAno || +S.hoje.slice(0, 4);
 function salModoBloco() {
-  return `<h2>Como contar cada ciclo</h2><div class="card pad"><div class="btns"><button class="btn sm ${salModo() === 'recebimento' ? 'pri' : ''}" data-act="salModo" data-v="recebimento">Mês em que recebo</button><button class="btn sm ${salModo() === 'fim' ? 'pri' : ''}" data-act="salModo" data-v="fim">Mês em que o ciclo termina</button></div>
-  <small style="display:block;margin-top:8px">${salModo() === 'recebimento' ? 'Quem paga antes de treinar (estilo “paga e depois faz”) conta no mês em que o ciclo começa; os demais, no mês em que termina.' : 'Todo ciclo conta no mês em que termina (ex.: 20/09 a 19/10 entra em outubro).'} A Velocity conta no mês corrido da aula. Só entram relatórios já gerados (ou importados) no app.</small></div>`;
+  return `<h2>Como o mês é contado</h2><div class="card pad"><small>Cada mês vai do dia 1 ao último dia. O relatório entra no mês em que o Pix cai: ao tocar em <b>Recebido</b>, o app pergunta a data e guarda. Enquanto não houver recebimento registrado, uso uma estimativa: quem paga antes conta no mês em que o ciclo começa; os demais, no mês em que ele termina. A Velocity conta no mês corrido da aula. Só entram relatórios gerados (ou importados) no app.</small></div>`;
 }
 const salTrio = (x, destaque) => `<div class="grid2" style="grid-template-columns:repeat(3,1fr);gap:6px;text-align:right"><div><small>Personal</small><div class="num"><b>${fmt(x.personal)}</b></div></div><div><small>Velocity</small><div class="num"><b>${fmt(x.velocity)}</b></div></div><div><small>Total</small><div class="num" style="${destaque ? 'color:var(--acc-text)' : ''}"><b>${fmt(x.total)}</b></div></div></div>`;
 function vSalario() {
@@ -1782,7 +1866,9 @@ const ICONES = {
 const ROTULOS = { inicio: 'Início', semana: 'Semana', rel: 'Relatórios', arquivo: 'Arquivo', alunos: 'Alunos', salario: 'Salário' };
 function renderChrome() {
   $('#tabs').innerHTML = '<div>' + Object.keys(ROTULOS).map(k => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONES[k]}</svg>${ROTULOS[k]}</button>`).join('') + '</div>';
-  $('#hoje').innerHTML = `<span class="synctxt"><span class="sync ${S.sync ? '' : 'off'}"></span>${S.sync ? 'Sincronizado' : 'Sem conexão'}</span><button class="btn sm dng sair" data-act="sair" aria-label="Sair da conta">Sair</button>`;
+  const olhoAberto = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>', olhoFechado = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.4 4.5-1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+  document.body.classList.toggle('oculta', !!S.ocultar);
+  $('#hoje').innerHTML = `<span class="synctxt"><span class="sync ${S.sync ? '' : 'off'}"></span>${S.sync ? 'Sincronizado' : 'Sem conexão'}</span><button class="btn sm olho" data-act="ocultar" aria-label="${S.ocultar ? 'Mostrar valores' : 'Ocultar valores'}" title="${S.ocultar ? 'Mostrar valores' : 'Ocultar valores'}">${S.ocultar ? olhoFechado : olhoAberto}</button><button class="btn sm dng sair" data-act="sair" aria-label="Sair da conta">Sair</button>`;
 }
 let pend = false;
 function render(forte) {
@@ -1798,7 +1884,7 @@ function render(forte) {
   }
   if (S.sheet && S.sheet.conta && !$('#sheet')?.hidden) { /* folha aberta não é redesenhada por dados externos */ }
 }
-document.addEventListener('toggle', e => { const t = e.target; if (t && t.classList && t.classList.contains('imp')) S.impAberto = t.open; if (t && t.classList && t.classList.contains('arq')) S.arqAberto = t.open ? t.dataset.conta : (S.arqAberto === t.dataset.conta ? null : S.arqAberto); }, true);
+document.addEventListener('toggle', e => { const t = e.target; if (t && t.classList && t.classList.contains('imp')) S.impAberto = t.open; if (t && t.classList && t.classList.contains('arq') && t.dataset.k) { S.arqOpen = S.arqOpen || new Set(); if (t.open) S.arqOpen.add(t.dataset.k); else S.arqOpen.delete(t.dataset.k); } }, true);
 function onData() { if (pend) return; pend = true; requestAnimationFrame(() => { pend = false; render(); }); }
 // ---------- bloqueio com Face ID / digital (passkey neste aparelho) ----------
 const Lock = (() => {
@@ -1872,6 +1958,13 @@ async function boot() {
   sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); });
   render(true);
 }
+S.ocultar = true;
+(() => {
+  const teste = /-?R\$\s?[\d.]+(?:,\d{1,2})?/, tudo = /-?R\$\s?[\d.]+(?:,\d{1,2})?/g;
+  const trata = n => { if (!S.ocultar) return; const p = n.parentNode; if (!p || /^(TEXTAREA|SCRIPT|STYLE)$/.test(p.nodeName)) return; if (teste.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(tudo, 'R$ ••••'); };
+  const varre = r => { if (!S.ocultar) return; if (r.nodeType === 3) { trata(r); return; } if (r.nodeType !== 1) return; const w = document.createTreeWalker(r, NodeFilter.SHOW_TEXT), arr = []; while (w.nextNode()) arr.push(w.currentNode); arr.forEach(trata); };
+  new MutationObserver(ms => { if (!S.ocultar) return; for (const m of ms) { if (m.type === 'characterData') trata(m.target); else m.addedNodes.forEach(varre); } }).observe(document.body, { childList: true, subtree: true, characterData: true });
+})();
 window.addEventListener('unhandledrejection', ev => { const m = String((ev.reason && ev.reason.message) || ev.reason || ''); console.warn(ev.reason); toast(/offline|fetch|network/i.test(m) ? 'Sem conexão: não consegui salvar.' : 'Não consegui salvar: ' + m.slice(0, 80)); });
 boot();
 /*APP_END*/
