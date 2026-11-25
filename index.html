@@ -844,13 +844,14 @@ function vInicio() {
     const fat = S.faturas[`${c.id}_${a.ciclo.ini}`], saldo = saldoAtual(c);
     const per = `${brShort(a.ciclo.ini)} – ${brShort(a.ciclo.fim)}`;
     let chip = '';
+    const pre = c.estilo === 2 || c.estilo === 3, cur = cicloDe(c.ciclo, S.hoje), pf = pre ? S.faturas[`${c.id}_${cur.ini}`] : fat;
+    const pg = pf ? (pf.pago ? '<span class="chip ok">Pago</span>' : pf.legado ? '<span class="chip">Enviado</span>' : '<span class="chip bad">Pendente</span>') : '';
     if (a.acao === 'gerar') chip = '<span class="chip acc">Gerar agora</span>';
-    else if (a.acao === 'proximo') chip = '<span class="chip">Próximo ciclo</span>';
-    else chip = fat && fat.pago ? '<span class="chip ok">Pago</span>' : '<span class="chip ok">Gerado</span>';
+    else chip = pg || '<span class="chip ok">Gerado</span>';
     const rep = saldo < 0 ? `<span class="chip bad">${-saldo} a repor</span>` : '';
     const enviei = a.acao === 'gerar' ? `<button class="btn sm" data-act="enviei" data-c="${c.id}" data-ini="${a.ciclo.ini}" data-fim="${a.ciclo.fim}">Já enviei</button>` : '';
     return `<div class="row" data-act="abrir" data-c="${c.id}" data-ini="${a.ciclo.ini}" data-fim="${a.ciclo.fim}">
-      <div class="main"><b>${esc(c.nome)}</b><small>${ESTILOS[c.estilo].quando} · ${per}</small></div>${rep}${chip}${enviei}</div>`;
+      <div class="main"><b>${esc(c.nome)}</b><small>${ESTILOS[c.estilo].quando} · ${a.acao === 'proximo' ? 'próximo ciclo ' : ''}${per}</small></div>${rep}${chip}${enviei}</div>`;
   };
   const abertos = Object.values(S.faturas).filter(f => !f.pago && !f.legado).sort((a, b) => b.ini.localeCompare(a.ini));
   const soma = abertos.reduce((s, f) => s + (f.total || 0), 0);
