@@ -95,7 +95,7 @@ button.chip:active { transform: scale(.97); }
 
 /* abas */
 .tabs { position: fixed; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); z-index: 20; padding: 0 max(8px, env(safe-area-inset-left, 0px)) env(safe-area-inset-bottom, 0px) max(8px, env(safe-area-inset-right, 0px)); }
-.tabs div { max-width: 760px; margin: 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); }
+.tabs div { max-width: 760px; margin: 0 auto; display: grid; grid-template-columns: repeat(7, 1fr); }
 .tabs button { background: none; border: 0; padding: 9px 0 8px; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--muted); font-family: var(--f-disp); font-weight: 600; font-size: 12.5px; letter-spacing: .04em; text-transform: uppercase; min-height: 56px; }
 .tabs button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .tabs button[aria-current="page"] { color: var(--ink); box-shadow: inset 0 3px 0 var(--acc); }
@@ -273,6 +273,21 @@ body.arrastando .dropzone b { color: var(--acc-text); }
 
 body.oculta input[inputmode=decimal]:not(:focus) { filter: blur(6px); }
 .btn.olho { padding: 4px 10px; min-height: 0; display: inline-flex; align-items: center; }
+@media (max-width: 520px) { .tabs button { font-size: 10px; letter-spacing: 0; gap: 2px; } .tabs button svg { width: 20px; height: 20px; } }
+
+.gchip { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-height: 52px; border-radius: 12px; border: 1px solid transparent; padding: 6px 14px; font-weight: 600; font-size: 16px; margin-top: 8px; text-align: left; font-family: inherit; }
+.gchip small { font-weight: 500; opacity: .85; margin-right: 10px; font-size: 13px; }
+.gchip.ok { background: var(--ok-soft); color: var(--ok); }
+.gchip.nao { background: var(--bad-soft); color: var(--bad); }
+.gchip.nao .nm { text-decoration: line-through; }
+.gstrip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.gstrip button { display: flex; flex-direction: column; align-items: center; min-height: 48px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); font-weight: 600; font-size: 13px; padding: 4px 0; }
+.gstrip button small { font-weight: 500; font-size: 12px; color: var(--muted); }
+.gstrip button.hj { border-color: var(--acc); }
+.gstrip button[aria-pressed="true"] { background: var(--acc); border-color: var(--acc); color: var(--acc-ink); }
+.gstrip button[aria-pressed="true"] small { color: var(--acc-ink); }
+.grid2 input[type=date], .grid2 input[type=time] { min-width: 0; width: 100%; }
+.hrow { display: flex; align-items: center; gap: 10px; margin-top: 6px; } .hrow span { min-width: 40px; font-weight: 600; } .hrow input { max-width: 150px; }
 </style>
 <div class="wrap">
   <header class="top">
@@ -416,6 +431,45 @@ function parseBloco(bloco, ctx) {
 function parseAgenda(texto, ctx) { return dividirBlocos(texto).map(b => parseBloco(b, ctx)).filter(b => b.ini && b.fim); }
 
 // ---------- índice das aulas dadas ----------
+// ---------- grade de aulas (marcação dia a dia) ----------
+const VEL_FIXAS_PADRAO = [{ wd: 1, h: '6:00' }, { wd: 1, h: '7:00' }];
+const chaveM = (c, m) => c + '|' + m;
+const hNorm = h => { const m = /^(\d{1,2})[:h](\d{2})$/.exec(String(h || '').trim()); return m ? `${+m[1]}:${m[2]}` : ''; };
+function montarGrade(docs) {
+  const meta = docs.find(x => x.id === 'meta') || {}, aus = (docs.find(x => x.id === 'aus') || {}).lista || [], dias = {}, meses = {};
+  for (const x of docs) if (/^m-\d{4}-\d{2}$/.test(x.id)) { meses[x.id.slice(2)] = x; Object.assign(dias, x.dias || {}); }
+  return { meta, aus, dias, meses };
+}
+const gradeAtiva = g => !!(g && g.meta && g.meta.desde);
+const ausenteG = (g, c, m, d) => ((g && g.aus) || []).some(a => a.c === c && (!a.m || a.m === m) && d >= a.de && d <= (a.ate || a.de));
+function planejado(conta, mb, d, g) {
+  if (ausenteG(g, conta.id, mb.nome, d)) return false;
+  const e = (g.dias || {})[d];
+  if (e && e.congC && e.congC.includes(conta.id)) return !!(e.cong && e.cong.includes(chaveM(conta.id, mb.nome)));
+  return (mb.dias || []).includes(wd(d));
+}
+function feitosDoDia(contas, g, d) {
+  const e = (g.dias || {})[d] || {}, fora = new Set(e.fora || []), out = new Set();
+  for (const c of contas) for (const mb of c.membros) { const k = chaveM(c.id, mb.nome); if (planejado(c, mb, d, g) && !fora.has(k)) out.add(k); }
+  for (const k of e.extras || []) out.add(k);
+  return out;
+}
+function gradeVel(g, hoje) {
+  const vel = [], off = [];
+  if (!gradeAtiva(g)) return { vel, off };
+  const fixas = g.meta.velFixas || VEL_FIXAS_PADRAO, datas = new Set(eachDay(g.meta.desde, hoje));
+  for (const d of Object.keys(g.dias || {})) datas.add(d);
+  for (const d of datas) {
+    const e = (g.dias || {})[d] || {}, lista = e.vel || [], offs = e.velOff || [], outros = x => (x && Number(x.outros) > 0 ? Number(x.outros) : null);
+    for (const f of fixas) if (f.wd === wd(d) && d >= g.meta.desde && d <= hoje) {
+      if (offs.includes(f.h)) { off.push(d + '|' + f.h); continue; }
+      const x = lista.find(v => v.h === f.h && !v.extra);
+      vel.push({ d, hora: f.h, n: x && x.n != null ? Number(x.n) : null, outros: outros(x) });
+    }
+    for (const x of lista) if (x.extra) vel.push({ d, hora: x.h, n: x.n != null ? Number(x.n) : null, outros: outros(x) });
+  }
+  return { vel, off };
+}
 function criarIndice(semanas) {
   const cobertos = new Set(), mapa = new Map();
   for (const w of semanas) {
@@ -426,8 +480,18 @@ function criarIndice(semanas) {
       const k = a.c + '|' + a.m; if (!mapa.has(k)) mapa.set(k, new Set()); mapa.get(k).add(a.d);
     }
   }
+  const G = typeof S !== 'undefined' ? S.grade : null;
+  if (gradeAtiva(G)) {
+    const contasG = S.contas.filter(c => c.ativo !== false);
+    for (const d of eachDay(G.meta.desde, S.hoje)) {
+      cobertos.add(d);
+      for (const st of mapa.values()) st.delete(d);
+      for (const k of feitosDoDia(contasG, G, d)) { if (!mapa.has(k)) mapa.set(k, new Set()); mapa.get(k).add(d); }
+    }
+  }
   return {
     cobertos,
+    ausente: (c, m, d) => gradeAtiva(G) && ausenteG(G, c, m, d),
     tem: (c, m, d) => (mapa.get(c + '|' + m) || new Set()).has(d),
     datas: (c, m, a, b) => [...(mapa.get(c + '|' + m) || [])].filter(d => d >= a && d <= b).sort()
   };
@@ -446,6 +510,7 @@ function planejarMembro(conta, mb, ciclo, idx, o) {
   const dias = o.dias || mb.dias, faltas = new Set(o.faltas || []), datas = [];
   for (const d of eachDay(ciclo.ini, ciclo.fim)) {
     if (faltas.has(d)) continue;
+    if (idx.ausente && idx.ausente(conta.id, mb.nome, d)) continue;
     if (idx.cobertos.has(d)) { if (idx.tem(conta.id, mb.nome, d)) datas.push(d); }
     else if (dias.includes(wd(d))) datas.push(d);
   }
@@ -647,6 +712,9 @@ function velocitySessoes(semanas) {
       mapa.set(atual + '|' + hora, { d: atual, hora, n: nm ? +nm[1] : null, key: atual + '|' + hora });
     }
   }
+  const gv = typeof S !== 'undefined' ? gradeVel(S.grade, S.hoje) : { vel: [], off: [] };
+  for (const k of gv.off) mapa.delete(k);
+  for (const x of gv.vel) { const key = x.d + '|' + x.hora, prev = mapa.get(key); mapa.set(key, { d: x.d, hora: x.hora, n: x.n != null ? x.n : (prev ? prev.n : null), outros: x.outros, key }); }
   return [...mapa.values()];
 }
 // mês corrido; doc = { ajustes: {chave: n}, remover: [chave], extras: [{d,hora,n}] }
@@ -658,10 +726,10 @@ function velocityMes(ym, semanas, doc) {
   for (const e of (doc && doc.extras) || []) if (e.d >= ini && e.d <= fim && !lista.some(s => s.key === e.d + '|' + e.hora)) lista.push({ d: e.d, hora: e.hora, n: e.n == null ? null : +e.n, key: e.d + '|' + e.hora, fonte: 'manual' });
   const sessoes = lista.filter(s => !rem.has(s.key)).map(s => {
     const n = aj[s.key] !== undefined && aj[s.key] !== null && aj[s.key] !== '' ? +aj[s.key] : s.n;
-    const f = faixaVelocity(n);
-    return { ...s, n, ajustado: aj[s.key] !== undefined && aj[s.key] !== null && aj[s.key] !== '', dia: DIAS[wd(s.d)], faixa: f ? f.nome : null, valor: f ? f.valor : null };
+    const f = faixaVelocity(n), ou = s.outros > 0;
+    return { ...s, n, ajustado: aj[s.key] !== undefined && aj[s.key] !== null && aj[s.key] !== '', dia: DIAS[wd(s.d)], faixa: ou ? 'Outro valor' : (f ? f.nome : null), valor: ou ? s.outros : (f ? f.valor : null) };
   }).sort((a, b) => a.d.localeCompare(b.d) || horaNum(a.hora) - horaNum(b.hora));
-  const semN = sessoes.filter(s => s.n == null).length;
+  const semN = sessoes.filter(s => s.n == null && !(s.outros > 0)).length;
   const total = sessoes.reduce((t, s) => t + (s.valor || 0), 0);
   return { ym, ini, fim, sessoes, semN, total, obs: ((doc && doc.obs) || '').trim(), periodoTxt: `${br(ini)} – ${br(fim)}`, arquivo: `Relatorio_Velocity_${String(mes).padStart(2, '0')}${ano}.pdf`, removidas: [...rem] };
 }
@@ -758,7 +826,7 @@ const Store = (() => {
   const lsWrite = c => { try { localStorage.setItem(lsKey(c), JSON.stringify(cache[c] || {})); } catch (e) { } };
   const lista = c => Object.entries(cache[c] || (cache[c] = lsRead(c))).map(([id, v]) => ({ ...v, id }));
   const emit = c => (subs[c] || []).forEach(cb => cb(lista(c)));
-  const COLS = ['contas', 'semanas', 'faturas', 'arquivados', 'config', 'velocity'];
+  const COLS = ['contas', 'semanas', 'faturas', 'arquivados', 'config', 'velocity', 'grade'];
   function watch(c, cb) { (subs[c] = subs[c] || []).push(cb); cb(lista(c)); return () => { subs[c] = (subs[c] || []).filter(x => x !== cb); }; }
   const chain = (k, fn) => { const p = (wq[k] || Promise.resolve()).then(fn, fn); wq[k] = p.catch(() => { }); return p; };
   async function reload(cols) {
@@ -869,7 +937,114 @@ function vInicio() {
 function vazio(t, p, b) { return `<div class="card vazio"><h3>${esc(t)}</h3><p>${esc(p)}</p>${b || ''}</div>`; }
 
 // ---------- semana ----------
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const nomeChip = (c, mb) => c.membros.length === 1 ? c.nome : mb.nome;
+const membroDeChave = k => { const [cid, ...r] = String(k).split('|'), nome = r.join('|'), c = contaDe(cid); return { c, mb: c && c.membros.find(m => m.nome === nome), nome }; };
 function vSemana() {
+  const modo = S.semModo || 'grade';
+  return `<div class="btns" style="margin-top:6px"><button class="btn ${modo === 'grade' ? 'pri' : ''}" data-act="semModo" data-v="grade">Grade do dia</button><button class="btn ${modo === 'texto' ? 'pri' : ''}" data-act="semModo" data-v="texto">Colar texto</button></div>` + (modo === 'grade' ? vGrade() : vSemanaTexto());
+}
+function vGrade() {
+  const g = S.grade;
+  if (!gradeAtiva(g)) {
+    return `<h2>Grade de aulas</h2><div class="card pad stack"><p style="margin:0">Aqui você marca, dia a dia, quem fez aula. Todos começam como <b>feitos</b>; toque para marcar quem não fez. Isso passa a contar na conferência e nos relatórios.</p>
+      <p class="muted" style="margin:0;font-size:13px">Cadastre o <b>horário</b> de cada aluno na aba Alunos para a ordem do dia. A grade vale a partir da data abaixo; os dias anteriores continuam pelo texto colado.</p>
+      <div class="field"><label class="lbl" for="gDesde">A grade vale a partir de</label><input type="date" id="gDesde" value="${cicloDe('20-19', S.hoje).ini}"></div>
+      <div class="btns"><button class="btn pri" data-act="gradeIniciar">Ativar a grade</button></div></div>`;
+  }
+  const d = S.gDia || S.hoje, desde = g.meta.desde, e = g.dias[d] || {}, fora = new Set(e.fora || []), seg = addDays(d, -wd(d));
+  const itens = [];
+  for (const c of ativos()) for (const mb of c.membros) if (planejado(c, mb, d, g)) itens.push({ c, mb, k: chaveM(c.id, mb.nome), h: (mb.horas || {})[wd(d)] || '' });
+  itens.sort((a, b) => (a.h ? horaNum(a.h) : 9999) - (b.h ? horaNum(b.h) : 9999) || (a.c.ordem || 0) - (b.c.ordem || 0));
+  const extras = e.extras || [], nNao = itens.filter(i => fora.has(i.k)).length, nFeitas = itens.length - nNao + extras.length;
+  let h = `<div class="card pad" style="margin-top:8px"><div class="gstrip">${[0, 1, 2, 3, 4, 5, 6].map(i => { const x = addDays(seg, i); return `<button data-act="gDia" data-d="${x}" aria-pressed="${x === d}" class="${x === S.hoje ? 'hj' : ''}">${DIAS_CURTO[i]}<small>${x.slice(8)}</small></button>`; }).join('')}</div>
+    <div class="nav" style="margin-top:10px"><button data-act="gPrev" aria-label="Dia anterior">‹</button><div><b class="num">${DIAS[wd(d)]}, ${br(d)}</b><small>${d === S.hoje ? 'hoje · ' : ''}${nFeitas} feita${nFeitas === 1 ? '' : 's'}${nNao ? ` · ${nNao} não feita${nNao === 1 ? '' : 's'}` : ''}</small></div><button data-act="gNext" aria-label="Próximo dia">›</button></div>
+    <div class="btns" style="margin-top:8px"><button class="btn sm" data-act="gHoje">Hoje</button><input type="date" id="gSalta" value="${d}" aria-label="Ir para a data" style="max-width:170px"></div></div>`;
+  if (d < desde) h += `<div class="note acc" style="margin-top:8px">Este dia é anterior ao início da grade (${br(desde)}). Ele vale pelo texto colado. Você pode mudar a data de início lá embaixo.</div>`;
+  h += `<h2>Aulas do dia</h2><div class="card pad">`;
+  h += itens.length ? itens.map(i => `<button class="gchip ${fora.has(i.k) ? 'nao' : 'ok'}" data-act="gTog" data-k="${esc(i.k)}" aria-pressed="${fora.has(i.k)}"><span class="nm">${i.h ? `<small>${esc(i.h)}</small>` : ''}${esc(nomeChip(i.c, i.mb))}</span><span>${fora.has(i.k) ? 'Não fez' : 'Feita'}</span></button>`).join('') : '<p class="muted" style="margin:0">Ninguém tem aula na grade neste dia.</p>';
+  h += extras.map(k => { const m = membroDeChave(k); return `<div class="gchip ok"><span class="nm"><small>extra</small>${esc(m.c ? nomeChip(m.c, m.mb || { nome: m.nome }) : k)}</span><button class="btn sm" data-act="gExtraRm" data-k="${esc(k)}" aria-label="Tirar aula extra">×</button></div>`; }).join('');
+  h += `<div class="addrow" style="margin-top:14px"><select id="gExtraSel" aria-label="Aluno da aula extra"><option value="">Aula extra: escolha o aluno…</option>${ativos().flatMap(c => c.membros.map(mb => `<option value="${esc(chaveM(c.id, mb.nome))}">${esc(c.membros.length > 1 ? c.nome + ' · ' + mb.nome : c.nome)}</option>`)).join('')}</select><button class="btn sm pri" data-act="gExtraAdd">+ Aula extra</button></div></div>`;
+  // Velocity
+  const fixas = (g.meta.velFixas || VEL_FIXAS_PADRAO).filter(f => f.wd === wd(d)).map(f => f.h), offs = e.velOff || [], lv = e.vel || [];
+  const horasVel = [...fixas.map(hh => ({ h: hh, extra: false })), ...lv.filter(x => x.extra).map(x => ({ h: x.h, extra: true }))].sort((a, b) => horaNum(a.h) - horaNum(b.h));
+  const linhaVel = it => {
+    const x = lv.find(v => v.h === it.h && !!v.extra === it.extra) || {}, off = !it.extra && offs.includes(it.h), n = x.n != null ? Number(x.n) : null, ou = Number(x.outros) > 0 ? Number(x.outros) : null, f = faixaVelocity(n);
+    const prev = off ? 'Sessão cancelada: não conta.' : ou ? `Outro valor: ${fmt(ou)}` : f ? `${f.nome} · ${fmt(f.valor)}` : 'Informe o nº de alunos.';
+    return `<div class="blk"><div class="blk-h"><b>Velocity ${esc(it.h)}${it.extra ? ' <small>(extra)</small>' : ''}</b>${off ? '<span class="chip">cancelada</span>' : ''}</div>${off ? '' : `<div class="grid2"><div><label class="lbl">Nº de alunos</label><input type="number" inputmode="numeric" min="0" max="99" data-vel="${esc(it.h)}" data-x="${it.extra ? 1 : 0}" data-f="n" value="${n == null ? '' : n}" aria-label="Nº de alunos às ${esc(it.h)}"></div><div><label class="lbl">Outros valores (R$)</label><input type="number" inputmode="decimal" step="0.01" min="0" data-vel="${esc(it.h)}" data-x="${it.extra ? 1 : 0}" data-f="outros" value="${ou == null ? '' : ou}" aria-label="Outros valores às ${esc(it.h)}"></div></div>`}
+      <small style="display:block;margin:6px 0">${esc(prev)}</small><div class="btns"><button class="btn sm ${it.extra ? 'dng' : ''}" data-act="${it.extra ? 'gVelRm' : 'gVelOff'}" data-h="${esc(it.h)}">${it.extra ? 'Remover sessão' : off ? 'Voltar a contar' : 'Sessão cancelada'}</button></div></div>`;
+  };
+  h += `<h2>Velocity</h2><div class="card pad stack">${horasVel.length ? horasVel.map(linhaVel).join('') : '<p class="muted" style="margin:0">Sem sessão fixa neste dia.</p>'}
+    <small>“Outros valores” substitui o valor da faixa (unidade sem bônus ou evento fechado). ${d > S.hoje ? 'Sessão futura: só conta quando a data chegar.' : ''}</small>
+    <div class="addrow"><input type="time" id="gVelH" aria-label="Horário da sessão extra da Velocity" style="min-width:120px;max-width:140px"><button class="btn sm" data-act="gVelAdd">+ Sessão Velocity (sábado/domingo)</button></div></div>`;
+  // férias
+  const aus = [...g.aus].sort((a, b) => b.de.localeCompare(a.de));
+  h += `<h2>Férias e faltas programadas</h2><div class="card pad stack"><p class="muted" style="margin:0;font-size:13px">O aluno sai da grade nesses dias e não conta como falta.</p>
+    <select id="ausSel" aria-label="Aluno"><option value="">Aluno…</option>${ativos().flatMap(c => c.membros.length > 1 ? [`<option value="${esc(c.id)}|">${esc(c.nome)} (todos)</option>`, ...c.membros.map(mb => `<option value="${esc(chaveM(c.id, mb.nome))}">${esc(c.nome + ' · ' + mb.nome)}</option>`)] : [`<option value="${esc(chaveM(c.id, c.membros[0].nome))}">${esc(c.nome)}</option>`]).join('')}</select>
+    <div class="grid2"><div><label class="lbl" for="ausDe">De</label><input type="date" id="ausDe"></div><div><label class="lbl" for="ausAte">Até (opcional)</label><input type="date" id="ausAte"></div></div>
+    <input id="ausMot" placeholder="Motivo (opcional)" aria-label="Motivo">
+    <div class="btns"><button class="btn pri" data-act="gAusAdd">Adicionar</button></div>
+    ${aus.length ? aus.map(a => { const c = contaDe(a.c); return `<div class="row" style="padding:8px 0"><div class="main"><b>${esc(c ? (a.m ? (c.membros.length > 1 ? c.nome + ' · ' + a.m : c.nome) : c.nome) : a.c)}</b><small>${brShort(a.de)}${a.ate && a.ate !== a.de ? ' – ' + brShort(a.ate) : ''}${a.mot ? ' · ' + esc(a.mot) : ''}</small></div><button class="btn sm dng" data-act="gAusRm" data-id="${esc(a.id)}" aria-label="Remover período">−</button></div>`; }).join('') : '<small>Nenhum período cadastrado.</small>'}</div>`;
+  h += `<h2>Configuração da grade</h2><div class="card pad stack"><div class="field"><label class="lbl" for="gDesde2">A grade vale a partir de</label><input type="date" id="gDesde2" value="${desde}"></div><div class="btns"><button class="btn sm" data-act="gDesdeSalvar">Salvar data</button></div><small>Antes dessa data, valem os textos colados. Os horários de cada aluno ficam no cadastro (aba Alunos).</small></div>`;
+  return h;
+}
+async function gravarMes(ym, fn) {
+  const doc = clone(S.grade.meses[ym] || { dias: {} }); delete doc.id; doc.dias = doc.dias || {}; fn(doc.dias);
+  for (const d of Object.keys(doc.dias)) { const e = doc.dias[d]; for (const k of Object.keys(e)) if (Array.isArray(e[k]) && !e[k].length) delete e[k]; if (!Object.keys(e).length) delete doc.dias[d]; }
+  S.grade.meses[ym] = { ...doc, id: 'm-' + ym };
+  for (const d of Object.keys(S.grade.dias)) if (d.startsWith(ym)) delete S.grade.dias[d];
+  Object.assign(S.grade.dias, doc.dias);
+  render(); await Store.set('grade', 'm-' + ym, doc);
+}
+const gravarDia = (d, fn) => gravarMes(d.slice(0, 7), dias => { fn(dias[d] = dias[d] || {}); });
+async function gravarMeta(fn) { const m = clone(S.grade.meta); delete m.id; fn(m); S.grade.meta = { ...m, id: 'meta' }; render(); await Store.set('grade', 'meta', m); }
+async function gravarAus(lista) { S.grade.aus = lista; render(); await Store.set('grade', 'aus', { lista }); }
+const addSet = (e, f, k) => { e[f] = e[f] || []; if (!e[f].includes(k)) e[f].push(k); };
+const rmSet = (e, f, k) => { e[f] = (e[f] || []).filter(x => x !== k); };
+function gradeDiferencas(blocos) {
+  const g = S.grade; if (!gradeAtiva(g)) return [];
+  const contasG = ativos(), ids = new Set(contasG.flatMap(c => c.membros.map(mb => chaveM(c.id, mb.nome)))), out = [];
+  for (const b of blocos) for (const d of eachDay(b.ini < g.meta.desde ? g.meta.desde : b.ini, b.fim)) {
+    const G = feitosDoDia(contasG, g, d), T = new Set(b.aulas.filter(a => a.d === d && !a.falta).map(a => chaveM(a.c, a.m)).filter(k => ids.has(k)));
+    for (const k of G) if (!T.has(k)) out.push({ d, k, tipo: 'soGrade', esc: 'texto' });
+    for (const k of T) if (!G.has(k)) out.push({ d, k, tipo: 'soTexto', esc: 'texto' });
+  }
+  return out.sort((a, b) => a.d.localeCompare(b.d));
+}
+function vDifs() {
+  const L = S.difs || [];
+  return `<div class="in"><div class="hd"><h3>Diferenças com a grade</h3><button class="btn sm" data-act="sheetFechar">Cancelar</button></div><div class="stack">
+  <p class="muted" style="margin:0">O texto colado não bate com a grade marcada. Escolha qual vale em cada caso. Nada é salvo antes de você confirmar.</p>
+  <div class="btns"><button class="btn sm" data-act="difTodos" data-v="texto">Texto vale em todos</button><button class="btn sm" data-act="difTodos" data-v="grade">Grade vale em todos</button></div>
+  <div class="card">${L.map((x, i) => { const m = membroDeChave(x.k), nome = m.c ? nomeChip(m.c, m.mb || { nome: m.nome }) : x.k; return `<div class="row" style="flex-wrap:wrap;gap:8px"><div class="main"><b>${dtxt(x.d)} · ${esc(nome)}</b><small>${x.tipo === 'soGrade' ? 'Grade: feita · Texto: não aparece' : 'Texto: feita · Grade: não aparece'}</small></div><button class="btn sm ${x.esc === 'texto' ? 'pri' : ''}" data-act="difEsc" data-i="${i}" data-v="texto">Usar texto</button><button class="btn sm ${x.esc === 'grade' ? 'pri' : ''}" data-act="difEsc" data-i="${i}" data-v="grade">Manter grade</button></div>`; }).join('')}</div>
+  <div class="btns"><button class="btn pri" data-act="difOk">Confirmar e salvar a semana</button></div></div></div>`;
+}
+async function salvarSemanas() {
+  const bl = S.blocos || []; if (!bl.length) return;
+  for (const b of bl) await Store.set('semanas', b.ini, { ini: b.ini, fim: b.fim, texto: b.texto, aulas: b.aulas.map(({ li, ...x }) => x), salvoEm: new Date().toISOString() });
+  const nr = bl.reduce((n, b) => n + b.naoRec.length, 0);
+  toast(`${bl.length} semana${bl.length > 1 ? 's' : ''} salva${bl.length > 1 ? 's' : ''}${nr ? ` · ${nr} linha(s) sem aluno` : ''}`);
+}
+async function aplicarDifs() {
+  const porMes = {};
+  for (const x of S.difs || []) if (x.esc === 'texto') (porMes[x.d.slice(0, 7)] = porMes[x.d.slice(0, 7)] || []).push(x);
+  for (const ym of Object.keys(porMes)) await gravarMes(ym, dias => {
+    for (const x of porMes[ym]) {
+      const e = dias[x.d] = dias[x.d] || {}, m = membroDeChave(x.k);
+      if (x.tipo === 'soGrade') { addSet(e, 'fora', x.k); rmSet(e, 'extras', x.k); }
+      else if (m.c && m.mb && planejado(m.c, m.mb, x.d, S.grade)) rmSet(e, 'fora', x.k); else addSet(e, 'extras', x.k);
+    }
+  });
+}
+async function congelarGrade(antes) {
+  const g = S.grade; if (!gradeAtiva(g) || !antes) return;
+  const ate = addDays(S.hoje, -1), porMes = {};
+  for (const d of eachDay(g.meta.desde, ate)) { const e = g.dias[d]; if (e && e.congC && e.congC.includes(antes.id)) continue; (porMes[d.slice(0, 7)] = porMes[d.slice(0, 7)] || []).push(d); }
+  for (const ym of Object.keys(porMes)) await gravarMes(ym, dias => {
+    for (const d of porMes[ym]) { const e = dias[d] = dias[d] || {}; addSet(e, 'congC', antes.id); for (const mb of antes.membros) if (planejado(antes, mb, d, S.grade)) addSet(e, 'cong', chaveM(antes.id, mb.nome)); }
+  });
+}
+function vSemanaTexto() {
   return `<h2>Agenda da semana</h2><div class="card pad">
     <label class="lbl" for="agendaTxt">Cole o texto das Notas (pode ser mais de uma semana)</label>
     <textarea id="agendaTxt" rows="11" spellcheck="false" placeholder="Agenda da semana 19/10-25/10&#10;&#10;19/10 - Segunda-feira&#10;Matheus&#10;Scylla&#10;..."></textarea>
@@ -1051,8 +1226,8 @@ function vArquivo() {
       const doAno = lista.filter(f => f.ini.startsWith(ano)), ms = [...new Set(doAno.map(f => f.ini.slice(5, 7)))].sort().reverse();
       o += `<details class="arq card" ${aberto(pref + ano)} data-k="${pref}${ano}"><summary><b>${ano}</b><span class="cnt">${doAno.length} PDF</span></summary>`;
       for (const m of ms) {
-        o += `<div class="arq-ano">${MESES[+m - 1]}</div>`;
-        o += doAno.filter(f => f.ini.slice(5, 7) === m).sort((x, y) => ordC(x) - ordC(y) || nomeDe(x).localeCompare(nomeDe(y)) || String(x.arquivo).localeCompare(String(y.arquivo))).map(linha).join('');
+        const doMes = doAno.filter(f => f.ini.slice(5, 7) === m).sort((x, y) => ordC(x) - ordC(y) || nomeDe(x).localeCompare(nomeDe(y)) || String(x.arquivo).localeCompare(String(y.arquivo)));
+        o += `<details class="arq card" ${aberto(pref + ano + '-' + m)} data-k="${pref}${ano}-${m}" style="margin:6px 8px"><summary><b>${MESES[+m - 1]}</b><span class="cnt">${doMes.length} PDF</span></summary>${doMes.map(linha).join('')}</details>`;
       }
       o += '</details>';
     }
@@ -1203,8 +1378,11 @@ function vAlunos() {
   const ativosL = ativos(), off = S.contas.filter(c => c.ativo === false);
   return `<div class="btns" style="margin-top:6px"><button class="btn pri" data-act="alunoNovo">Novo aluno</button></div>
   <h2>Alunos ativos</h2><div class="card">${ativosL.length ? ativosL.map(linha).join('') : '<div class="row"><div class="main muted">Nenhum aluno ativo.</div></div>'}</div>
-  ${off.length ? `<h2>Inativos</h2><div class="card">${off.map(linha).join('')}</div><small style="display:block;margin:6px 4px">Aluno inativo sai do Início e dos Relatórios. Os PDFs dele ficam em “Inativos” na aba Arquivo. Nada é apagado.</small>` : ''}
-  <h2>Geral</h2><div class="card pad"><div class="field"><label class="lbl" for="cfgIgn">Nomes a ignorar na agenda (separados por vírgula)</label><input id="cfgIgn" value="${esc((g.ignorar || []).join(', '))}"></div>
+  ${off.length ? `<h2>Inativos</h2><div class="card">${off.map(linha).join('')}</div><small style="display:block;margin:6px 4px">Aluno inativo sai do Início e dos Relatórios. Os PDFs dele ficam em “Inativos” na aba Arquivo. Nada é apagado.</small>` : ''}`;
+}
+function vConfig() {
+  const g = S.config;
+  return `<h2 style="margin-top:6px">Configurações</h2><div class="card pad"><div class="field"><label class="lbl" for="cfgIgn">Nomes a ignorar na agenda (separados por vírgula)</label><input id="cfgIgn" value="${esc((g.ignorar || []).join(', '))}"></div>
   <div class="field"><label class="lbl" for="cfgPix">Chave Pix (CNPJ)</label><input id="cfgPix" inputmode="numeric" value="${esc(g.pix)}"></div>
   <div class="field"><label class="lbl" for="cfgAss">Assinatura do relatório</label><input id="cfgAss" value="${esc(g.assinatura)}"></div>
   <div class="field" style="margin-top:14px"><span class="lbl">Bloqueio com Face ID / digital (só neste aparelho)</span><div class="btns"><button class="btn" data-act="lockToggle">${Lock.ativo() ? 'Desativar bloqueio' : 'Ativar bloqueio com Face ID'}</button></div>${Lock.ativo() ? `<span class="lbl" style="margin-top:10px">Pedir de novo quando eu voltar ao app</span><div class="btns"><button class="btn sm ${Lock.espera() === 0 ? 'pri' : ''}" data-act="lockEsp" data-v="0">Sempre que sair</button><button class="btn sm ${Lock.espera() === 30 ? 'pri' : ''}" data-act="lockEsp" data-v="30">Após 30 s</button><button class="btn sm ${Lock.espera() === 300 ? 'pri' : ''}" data-act="lockEsp" data-v="300">Após 5 min</button></div>` : ''}<small>${Lock.ativo() ? 'Ativo neste aparelho. “Sempre que sair” também esconde o conteúdo na tela de apps abertos do iPhone.' : 'Ao ativar, o app pede Face ID (ou digital) ao abrir. Cada aparelho tem a sua própria escolha.'}</small></div>
@@ -1217,7 +1395,7 @@ function lerSheet() {
   c.preco = Number($('#fPreco').value) || 0; c.taxa = Number($('#fTaxa').value) || 0;
   c.saldoInicial = -Math.max(0, Math.round(Number($('#fRep').value) || 0));
   if (c.estilo === 4) { c.precoBaixo = Number($('#fPreco2').value) || 0; c.limite = (Number($('#fLim').value) || 75) / 100; c.limiteInclusivo = $('#fIncl').checked; }
-  c.membros.forEach((m, i) => { m.nome = $(`#mNome${i}`).value.trim(); m.apelidos = $(`#mApe${i}`).value.split(',').map(x => x.trim()).filter(Boolean); });
+  c.membros.forEach((m, i) => { m.nome = $(`#mNome${i}`).value.trim(); m.apelidos = $(`#mApe${i}`).value.split(',').map(x => x.trim()).filter(Boolean); const hs = {}; for (const di of m.dias) { const el = $(`#h-${i}-${di}`); if (el && el.value) hs[di] = el.value; else if (!el && m.horas && m.horas[di]) hs[di] = m.horas[di]; } m.horas = hs; });
 }
 function vSheetConta() {
   const c = S.sheet.conta, novo = S.sheet.novo;
@@ -1237,6 +1415,7 @@ function vSheetConta() {
     ${c.membros.map((m, i) => `<div class="mb"><div class="field"><label class="lbl" for="mNome${i}">Nome</label><input id="mNome${i}" value="${esc(m.nome)}"></div>
       <div class="field"><label class="lbl" for="mApe${i}">Como aparece na agenda (apelidos, separados por vírgula)</label><input id="mApe${i}" value="${esc((m.apelidos || []).join(', '))}" placeholder="Tele, Telesforo"></div>
       <div class="field"><span class="lbl">Dias fixos</span><div class="dias">${DIAS_CURTO.map((d, di) => `<button type="button" data-act="dia" data-m="${i}" data-d="${di}" aria-pressed="${m.dias.includes(di)}">${d}</button>`).join('')}</div></div>
+      ${m.dias.length ? `<div class="field"><span class="lbl">Horário de cada dia (define a ordem na grade)</span>${m.dias.map(di => `<label class="hrow"><span>${DIAS_CURTO[di]}</span><input type="time" id="h-${i}-${di}" value="${esc((m.horas || {})[di] || '')}"></label>`).join('')}</div>` : ''}
       ${c.membros.length > 1 ? `<div class="btns" style="margin-top:10px"><button class="btn sm dng" data-act="rmMembro" data-m="${i}">Remover pessoa</button></div>` : ''}</div>`).join('')}
     <div class="btns" style="margin-top:10px"><button class="btn sm" data-act="addMembro">Adicionar pessoa ao mesmo relatório</button></div></div>
   ${novo ? '' : `<div class="card pad"><span class="lbl">Situação: ${c.ativo === false ? 'inativo' : 'ativo'}</span><div class="btns"><button class="btn" data-act="sheetAtivo">${c.ativo === false ? 'Reativar aluno' : 'Inativar aluno'}</button></div><small style="display:block;margin-top:6px">${c.ativo === false ? 'Reativar devolve o aluno ao Início e aos Relatórios.' : 'Inativar tira o aluno do Início e dos Relatórios e leva os PDFs dele para “Inativos” no Arquivo. Nada é apagado.'}</small></div>`}
@@ -1587,10 +1766,36 @@ document.addEventListener('click', async ev => {
       case 'limparSem': { const ta = $('#agendaTxt'); ta.value = ''; S.agendaTxt = ''; renderPrevia(); break; }
       case 'salvarSem': {
         const bl = S.blocos || []; if (!bl.length) break;
-        for (const b of bl) await Store.set('semanas', b.ini, { ini: b.ini, fim: b.fim, texto: b.texto, aulas: b.aulas.map(({ li, ...x }) => x), salvoEm: new Date().toISOString() });
-        const nr = bl.reduce((s, b) => s + b.naoRec.length, 0);
-        toast(`${bl.length} semana${bl.length > 1 ? 's' : ''} salva${bl.length > 1 ? 's' : ''}${nr ? ` · ${nr} linha(s) sem aluno` : ''}`); break;
+        const dif = gradeDiferencas(bl); if (dif.length) { S.difs = dif; abrirSheet(vDifs()); break; }
+        await salvarSemanas(); break;
       }
+      case 'difEsc': { S.difs[+d.i].esc = d.v; const sh = $('#sheet'), top = sh ? sh.scrollTop : 0; abrirSheet(vDifs()); $('#sheet').scrollTop = top; break; }
+      case 'difTodos': { S.difs.forEach(x => x.esc = d.v); abrirSheet(vDifs()); break; }
+      case 'difOk': { fecharSheet(); await aplicarDifs(); await salvarSemanas(); S.difs = null; break; }
+      case 'semModo': S.semModo = d.v; render(true); break;
+      case 'gradeIniciar': { const v = ($('#gDesde') || {}).value; if (!/^\d{4}-\d{2}-\d{2}$/.test(v || '')) { toast('Escolha a data de início'); break; } await gravarMeta(m => { m.desde = v; }); toast('Grade ativada'); break; }
+      case 'gDesdeSalvar': { const v = ($('#gDesde2') || {}).value; if (!/^\d{4}-\d{2}-\d{2}$/.test(v || '')) { toast('Escolha a data'); break; } await gravarMeta(m => { m.desde = v; }); toast('Data da grade salva'); break; }
+      case 'gDia': S.gDia = d.d; render(); break;
+      case 'gPrev': S.gDia = addDays(S.gDia || S.hoje, -1); render(); break;
+      case 'gNext': S.gDia = addDays(S.gDia || S.hoje, 1); render(); break;
+      case 'gHoje': S.gDia = S.hoje; render(); break;
+      case 'gTog': { const dia = S.gDia || S.hoje; await gravarDia(dia, e => { if ((e.fora || []).includes(d.k)) rmSet(e, 'fora', d.k); else addSet(e, 'fora', d.k); }); break; }
+      case 'gExtraAdd': {
+        const k = ($('#gExtraSel') || {}).value; if (!k) { toast('Escolha o aluno da aula extra'); break; }
+        const dia = S.gDia || S.hoje, m = membroDeChave(k), e0 = S.grade.dias[dia] || {};
+        if (m.c && m.mb && planejado(m.c, m.mb, dia, S.grade)) { if ((e0.fora || []).includes(k)) { await gravarDia(dia, e => rmSet(e, 'fora', k)); toast('Este aluno já tem aula na grade: voltou para feita'); } else toast('Este aluno já tem aula na grade neste dia'); break; }
+        await gravarDia(dia, e => addSet(e, 'extras', k)); break;
+      }
+      case 'gExtraRm': await gravarDia(S.gDia || S.hoje, e => rmSet(e, 'extras', d.k)); break;
+      case 'gVelOff': await gravarDia(S.gDia || S.hoje, e => { if ((e.velOff || []).includes(d.h)) rmSet(e, 'velOff', d.h); else addSet(e, 'velOff', d.h); }); break;
+      case 'gVelRm': await gravarDia(S.gDia || S.hoje, e => { e.vel = (e.vel || []).filter(x => !(x.extra && x.h === d.h)); }); break;
+      case 'gVelAdd': { const hh = hNorm(($('#gVelH') || {}).value); if (!hh) { toast('Escolha o horário da sessão'); break; } await gravarDia(S.gDia || S.hoje, e => { e.vel = e.vel || []; if (!e.vel.some(x => x.extra && x.h === hh)) e.vel.push({ h: hh, extra: true, n: null, outros: null }); }); break; }
+      case 'gAusAdd': {
+        const v = ($('#ausSel') || {}).value, de = ($('#ausDe') || {}).value, ate = ($('#ausAte') || {}).value || de, mot = (($('#ausMot') || {}).value || '').trim();
+        if (!v) { toast('Escolha o aluno'); break; } if (!de) { toast('Escolha a data inicial'); break; } if (ate < de) { toast('A data final vem antes da inicial'); break; }
+        const [cid, ...r] = v.split('|'); await gravarAus([...S.grade.aus, { id: uid(), c: cid, m: r.join('|'), de, ate, mot }]); toast('Período adicionado'); break;
+      }
+      case 'gAusRm': await gravarAus(S.grade.aus.filter(a => a.id !== d.id)); break;
       case 'editSem': { const w = S.semanas.find(x => x.id === d.id); if (w) { const ta = $('#agendaTxt'); ta.value = w.texto || ''; S.agendaTxt = ta.value; renderPrevia(); window.scrollTo(0, 0); } break; }
       case 'delFatura': {
         const arq = !S.faturas[d.id] && S.arquivados.find(x => x.id === d.id), f = S.faturas[d.id] || arq; if (!f) break;
@@ -1652,6 +1857,7 @@ document.addEventListener('click', async ev => {
         if (c.membros.length === 1 && !c.nome) c.nome = c.membros[0].nome;
         c.arquivo = c.arquivo || c.nome.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+e\s+/g, '_').replace(/\s+/g, '_');
         c.id = c.id || slug(c.nome); if (S.sheet.novo && contaDe(c.id)) c.id += '-' + Date.now().toString(36).slice(-3);
+        { const antes = contaDe(c.id); if (antes && gradeAtiva(S.grade) && JSON.stringify(antes.membros.map(m => [...(m.dias || [])].sort())) !== JSON.stringify(c.membros.map(m => [...(m.dias || [])].sort()))) await congelarGrade(antes); }
         await Store.set('contas', c.id, c); S.contas = [...S.contas.filter(x => x.id !== c.id), c].sort((x, y) => (x.ordem || 0) - (y.ordem || 0)); fecharSheet(); render(true); await reprocessarSemanas(); toast('Aluno salvo'); break;
       }
       case 'sheetAtivo': { lerSheet(); const c = S.sheet.conta; c.ativo = c.ativo === false; await Store.set('contas', c.id, c); S.contas = [...S.contas.filter(x => x.id !== c.id), c].sort((x, y) => (x.ordem || 0) - (y.ordem || 0)); fecharSheet(); render(true); toast(c.ativo === false ? 'Aluno inativado' : 'Aluno reativado'); break; }
@@ -1737,6 +1943,8 @@ document.addEventListener('change', ev => {
   if (t.dataset && t.dataset.vn !== undefined) { const k = t.dataset.vn, ym = k.slice(0, 7), val = t.value.trim(); velSalvar(ym, x => { if (val === '') delete x.ajustes[k]; else x.ajustes[k] = Math.max(0, Math.round(+val)); }); return; }
   if (t.dataset && t.dataset.exp !== undefined && S.exp) { if (t.checked) S.exp.sel.add(t.dataset.exp); else S.exp.sel.delete(t.dataset.exp); const sh = $('#sheet'), top = sh ? sh.scrollTop : 0; abrirSheet(vExport()); $('#sheet').scrollTop = top; return; }
   if ((t.id === 'expDe' || t.id === 'expAte') && S.exp) { S.exp[t.id === 'expDe' ? 'de' : 'ate'] = t.value; const sh = $('#sheet'), top = sh ? sh.scrollTop : 0; abrirSheet(vExport()); $('#sheet').scrollTop = top; return; }
+  if (t.id === 'gSalta' && /^\d{4}-\d{2}-\d{2}$/.test(t.value)) { S.gDia = t.value; render(); return; }
+  if (t.dataset && t.dataset.vel !== undefined && S.tab === 'semana') { const h = t.dataset.vel, ext = t.dataset.x === '1', f = t.dataset.f, val = t.value === '' ? null : Number(t.value); gravarDia(S.gDia || S.hoje, e => { e.vel = e.vel || []; let x = e.vel.find(v => v.h === h && !!v.extra === ext); if (!x) { x = { h, extra: ext, n: null, outros: null }; e.vel.push(x); } x[f] = val; if (!ext && x.n == null && !(Number(x.outros) > 0)) e.vel = e.vel.filter(v => v !== x); }); return; }
   if (t.id === 'chkLivre' && S.rel) { const lv = S.rel.livre; if (lv) lv.ativo = t.checked; else S.rel.livre = { ativo: t.checked, titulo: '', linhas: [{ desc: '', data: '', valor: '' }] }; if (t.checked && !(S.rel.livre.linhas || []).length) S.rel.livre.linhas = [{ desc: '', data: '', valor: '' }]; render(); return; }
   if (t.id === 'livTit' && S.rel && S.rel.livre) { S.rel.livre.titulo = t.value; render(); return; }
   if (t.dataset && t.dataset.lv !== undefined && S.rel && S.rel.livre) { const x = (S.rel.livre.linhas || [])[+t.dataset.lv]; if (x) { x[t.dataset.f] = t.dataset.f === 'valor' ? (t.value === '' ? '' : Number(t.value)) : t.value; render(); } return; }
@@ -1806,7 +2014,7 @@ function pdfVelocity(doc, v, cfg, k) {
   ['Data', 'Dia', 'Horário', 'Nº Alunos', 'Faixa', 'Valor'].forEach((t, i) => cel(t, i, y, true, COR.white)); y += rh;
   v.sessoes.forEach((s, i) => {
     ensure(rh); doc.setFillColor(...(i % 2 === 0 ? COR.light : COR.white)); doc.setDrawColor(...COR.grid); doc.rect(mx, y, cw, rh, 'FD');
-    [br(s.d), s.dia, s.hora, String(s.n), s.faixa, fmt(s.valor)].forEach((t, j) => cel(t, j, y, false, COR.dark)); y += rh;
+    [br(s.d), s.dia, s.hora, s.n == null ? '–' : String(s.n), s.faixa, fmt(s.valor)].forEach((t, j) => cel(t, j, y, false, COR.dark)); y += rh;
   });
   y += 5.7 * k;
   const barra = (h, bg) => { ensure(h); doc.setFillColor(...bg); doc.rect(mx, y, cw, h, 'F'); };
@@ -1861,9 +2069,10 @@ const ICONES = {
   rel: '<path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4M10 12h5M10 16h5"/>',
   arquivo: '<path d="M3.5 7.5V19h17V9.5h-9L9.5 7.5z"/><path d="M3.5 7.5V5.5h6l2 2"/>',
   salario: '<rect x="3.5" y="6.5" width="17" height="11" rx="2"/><circle cx="12" cy="12" r="2.4"/><path d="M6.5 9.5v.01M17.5 14.5v.01"/>',
+  config: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
   alunos: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5"/><circle cx="17" cy="9" r="2.4"/><path d="M16 14.2c2.6-.3 4.2 1.2 4.7 4.3"/>'
 };
-const ROTULOS = { inicio: 'Início', semana: 'Semana', rel: 'Relatórios', arquivo: 'Arquivo', alunos: 'Alunos', salario: 'Salário' };
+const ROTULOS = { inicio: 'Início', semana: 'Semana', rel: 'Relatórios', arquivo: 'Arquivo', alunos: 'Alunos', salario: 'Salário', config: 'Config.' };
 function renderChrome() {
   $('#tabs').innerHTML = '<div>' + Object.keys(ROTULOS).map(k => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONES[k]}</svg>${ROTULOS[k]}</button>`).join('') + '</div>';
   const olhoAberto = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>', olhoFechado = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.4 4.5-1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
@@ -1875,10 +2084,10 @@ function render(forte) {
   const y = window.scrollY; renderChrome();
   const v = $('#view');
   if (S.tab === 'semana') {
-    if (forte || !$('#agendaTxt')) { v.innerHTML = vSemana(); const ta = $('#agendaTxt'); ta.value = S.agendaTxt; }
+    if (forte || !$('#agendaTxt')) { v.innerHTML = vSemana(); const ta = $('#agendaTxt'); if (ta) ta.value = S.agendaTxt; }
     renderPrevia(); renderSemLista();
   } else {
-    v.innerHTML = { inicio: vInicio, rel: vRel, arquivo: vArquivo, alunos: vAlunos, velocity: vVelocity, salario: vSalario }[S.tab]();
+    v.innerHTML = { inicio: vInicio, rel: vRel, arquivo: vArquivo, alunos: vAlunos, velocity: vVelocity, salario: vSalario, config: vConfig }[S.tab]();
     if (S.tab === 'rel') { /* mantém posição */ }
     window.scrollTo(0, forte ? 0 : y);
   }
@@ -1953,12 +2162,14 @@ async function boot() {
   Store.watch('semanas', l => { S.semanas = l.sort((a, b) => a.ini < b.ini ? -1 : 1); ok(); onData(); });
   Store.watch('faturas', l => { S.faturas = Object.fromEntries(l.map(f => [f.id, f])); ok(); onData(); });
   Store.watch('arquivados', l => { S.arquivados = l; ok(); onData(); });
+  Store.watch('grade', l => { S.grade = montarGrade(l); onData(); });
   Store.watch('velocity', l => { S.velocity = Object.fromEntries(l.map(x => [x.id, x])); onData(); });
   Store.watch('config', l => { const g = l.find(x => x.id === 'geral'); S.config = { ...CFG_PADRAO, ...(g || {}) }; ok(); onData(); });
   sb.auth.onAuthStateChange(ev => { if (ev === 'SIGNED_OUT') location.reload(); });
   render(true);
 }
 S.ocultar = true;
+S.grade = montarGrade([]);
 (() => {
   const teste = /-?R\$\s?[\d.]+(?:,\d{1,2})?/, tudo = /-?R\$\s?[\d.]+(?:,\d{1,2})?/g;
   const trata = n => { if (!S.ocultar) return; const p = n.parentNode; if (!p || /^(TEXTAREA|SCRIPT|STYLE)$/.test(p.nodeName)) return; if (teste.test(n.nodeValue)) n.nodeValue = n.nodeValue.replace(tudo, 'R$ ••••'); };
