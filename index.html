@@ -288,6 +288,12 @@ body.oculta input[inputmode=decimal]:not(:focus) { filter: blur(6px); }
 .gstrip button[aria-pressed="true"] small { color: var(--acc-ink); }
 .grid2 input[type=date], .grid2 input[type=time] { min-width: 0; width: 100%; }
 .hrow { display: flex; align-items: center; gap: 10px; margin-top: 6px; } .hrow span { min-width: 40px; font-weight: 600; } .hrow input { max-width: 150px; }
+
+.gchip.pend { background: var(--acc-soft); color: var(--acc-text); border-color: var(--acc); }
+.aviso-g { display: flex; flex-direction: column; gap: 6px; background: var(--acc-soft); color: var(--ink); border: 1px solid var(--acc); border-radius: 12px; padding: 12px 14px; margin: 10px 0 4px; }
+.aviso-g b { color: var(--acc-text); }
+.tabs button { position: relative; }
+.bdg { position: absolute; top: 3px; left: calc(50% + 6px); background: var(--bad); color: #fff; border-radius: 999px; font-size: 10px; line-height: 16px; min-width: 16px; padding: 0 4px; text-align: center; }
 </style>
 <div class="wrap">
   <header class="top">
@@ -448,10 +454,17 @@ function planejado(conta, mb, d, g) {
   if (e && e.congC && e.congC.includes(conta.id)) return !!(e.cong && e.cong.includes(chaveM(conta.id, mb.nome)));
   return (mb.dias || []).includes(wd(d));
 }
+function planejadosDoDia(contas, g, d) { const out = []; for (const c of contas) for (const mb of c.membros) if (planejado(c, mb, d, g)) out.push(chaveM(c.id, mb.nome)); return out; }
+function estadoK(g, d, k) { const e = (g.dias || {})[d] || {}; return (e.fora || []).includes(k) ? 'fora' : (e.ok || []).includes(k) ? 'ok' : 'pend'; }
+const diaResolvido = (contas, g, d) => planejadosDoDia(contas, g, d).every(k => estadoK(g, d, k) !== 'pend');
 function feitosDoDia(contas, g, d) {
-  const e = (g.dias || {})[d] || {}, fora = new Set(e.fora || []), out = new Set();
-  for (const c of contas) for (const mb of c.membros) { const k = chaveM(c.id, mb.nome); if (planejado(c, mb, d, g) && !fora.has(k)) out.add(k); }
-  for (const k of e.extras || []) out.add(k);
+  const out = new Set(); for (const k of planejadosDoDia(contas, g, d)) if (estadoK(g, d, k) === 'ok') out.add(k);
+  for (const k of ((g.dias || {})[d] || {}).extras || []) out.add(k);
+  return out;
+}
+function pendenciasGrade(contas, g, hoje) {
+  if (!gradeAtiva(g)) return []; const out = [];
+  for (const d of eachDay(g.meta.desde, addDays(hoje, -1))) { const n = planejadosDoDia(contas, g, d).filter(k => estadoK(g, d, k) === 'pend').length; if (n) out.push({ d, n }); }
   return out;
 }
 function gradeVel(g, hoje) {
@@ -484,6 +497,7 @@ function criarIndice(semanas) {
   if (gradeAtiva(G)) {
     const contasG = S.contas.filter(c => c.ativo !== false);
     for (const d of eachDay(G.meta.desde, S.hoje)) {
+      if (!diaResolvido(contasG, G, d)) continue;
       cobertos.add(d);
       for (const st of mapa.values()) st.delete(d);
       for (const k of feitosDoDia(contasG, G, d)) { if (!mapa.has(k)) mapa.set(k, new Set()); mapa.get(k).add(d); }
@@ -904,6 +918,28 @@ function toast(msg) { let t = $('#toast'); if (!t) { t = document.createElement(
 const saldoAtual = c => { let best = null; for (const f of Object.values(S.faturas)) if (f.contaId === c.id && (!best || f.ini > best.ini)) best = f; return best ? (best.saldoApos || 0) : (c.saldoInicial || 0); };
 
 // ---------- início ----------
+const pendGradeN = () => { try { return pendenciasGrade(ativos(), S.grade, S.hoje).length; } catch (e) { return 0; } };
+function avisoGradeHTML() {
+  const pg = pendenciasGrade(ativos(), S.grade, S.hoje); if (!pg.length) return '';
+  const n = pg.reduce((t, x) => t + x.n, 0);
+  return `<div class="aviso-g"><b>Aulas sem confirmação na grade</b><span>${n} aula${n > 1 ? 's' : ''} em ${pg.length} dia${pg.length > 1 ? 's' : ''} ainda estão em amarelo. Confirme para elas entrarem na conta.</span><div class="btns"><button class="btn pri" data-act="gPend">Resolver agora</button></div></div>`;
+}
+function vAvisoGrade() {
+  const pg = pendenciasGrade(ativos(), S.grade, S.hoje), n = pg.reduce((t, x) => t + x.n, 0);
+  if (!pg.length) return `<div class="in"><div class="hd"><h3>Tudo confirmado</h3><button class="btn sm" data-act="sheetFechar">Fechar</button></div><p>Não há aulas em amarelo.</p></div>`;
+  return `<div class="in"><div class="hd"><h3>Confirme as aulas pendentes</h3><button class="btn sm" data-act="sheetFechar">Depois</button></div><div class="stack">
+  <p style="margin:0">${n} aula${n > 1 ? 's' : ''} em ${pg.length} dia${pg.length > 1 ? 's' : ''} ainda não foram confirmadas na grade. Enquanto estiverem em amarelo, o dia não entra na conta.</p>
+  <div class="card">${pg.slice(0, 10).map(x => `<div class="row" style="flex-wrap:wrap;gap:8px"><div class="main"><b>${dtxt(x.d)}</b><small>${x.n} pendente${x.n > 1 ? 's' : ''}</small></div><button class="btn sm" data-act="gAbrirDia" data-d="${x.d}">Abrir</button><button class="btn sm" data-act="gOkDia" data-d="${x.d}">Todos feitos</button></div>`).join('')}${pg.length > 10 ? `<div class="row"><small>+ ${pg.length - 10} dia(s) mais antigos</small></div>` : ''}</div>
+  <div class="btns"><button class="btn pri" data-act="gPend">Resolver agora</button></div></div></div>`;
+}
+function checarAvisoGrade() {
+  if (!S.carregou || !gradeAtiva(S.grade) || !S.contas.length) return;
+  const pg = pendenciasGrade(ativos(), S.grade, S.hoje); if (!pg.length) return;
+  const k = 'fmgsa:gaviso:' + (TESTE ? 't' : 'r'); let v = ''; try { v = localStorage.getItem(k) || ''; } catch (e) { }
+  if (v === S.hoje) return; const sh = $('#sheet'); if (sh && !sh.hidden) return;
+  try { localStorage.setItem(k, S.hoje); } catch (e) { }
+  abrirSheet(vAvisoGrade());
+}
 function vInicio() {
   const hojeTxt = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' });
   if (!S.contas.length) return vazio('Nenhum aluno cadastrado', 'Cadastre seus alunos para começar a gerar os relatórios.', '<button class="btn pri" data-act="alunoNovo">Cadastrar aluno</button>');
@@ -928,7 +964,7 @@ function vInicio() {
   const ult = S.semanas[S.semanas.length - 1];
   const dentro = ult && ult.ini <= S.hoje && S.hoje <= ult.fim;
   const agendaMsg = !ult ? 'Nenhuma agenda salva ainda.' : dentro ? `Agenda desta semana salva (${brShort(ult.ini)} – ${brShort(ult.fim)}).` : `Última agenda salva: ${brShort(ult.ini)} – ${brShort(ult.fim)}. Falta a desta semana.`;
-  return `<h2>Fechamentos</h2><div class="card">${linhas.map(row).join('')}</div>
+  return avisoGradeHTML() + `<h2>Fechamentos</h2><div class="card">${linhas.map(row).join('')}</div>
   <h2>Agenda</h2><div class="card"><div class="row" data-act="irSemana"><div class="main"><b>${agendaMsg}</b><small>Cole o texto das Notas na aba Semana</small></div><span class="chip ${dentro ? 'ok' : 'acc'}">${dentro ? 'Em dia' : 'Pendente'}</span></div></div>
   <h2>A receber${abertos.length ? ` · <span class="num">${fmt(soma)}</span>` : ''}</h2>
   <div class="card">${abertos.length ? abertos.map(f => `<div class="row"><div class="main"><b>${esc(f.nome || contaDe(f.contaId)?.nome || f.contaId)}</b><small>${brShort(f.ini)} – ${brShort(f.fim)}</small></div><span class="valor">${fmt(f.total || 0)}</span><button class="btn sm" data-act="pago" data-id="${f.id}">Recebido</button></div>`).join('') : '<div class="row"><div class="main muted">Nada em aberto nos relatórios gerados.</div></div>'}</div>
@@ -956,13 +992,14 @@ function vGrade() {
   const itens = [];
   for (const c of ativos()) for (const mb of c.membros) if (planejado(c, mb, d, g)) itens.push({ c, mb, k: chaveM(c.id, mb.nome), h: (mb.horas || {})[wd(d)] || '' });
   itens.sort((a, b) => (a.h ? horaNum(a.h) : 9999) - (b.h ? horaNum(b.h) : 9999) || (a.c.ordem || 0) - (b.c.ordem || 0));
-  const extras = e.extras || [], nNao = itens.filter(i => fora.has(i.k)).length, nFeitas = itens.length - nNao + extras.length;
+  const extras = e.extras || [], est = k => estadoK(g, d, k), nNao = itens.filter(i => est(i.k) === 'fora').length, nPend = itens.filter(i => est(i.k) === 'pend').length, nFeitas = itens.filter(i => est(i.k) === 'ok').length + extras.length;
   let h = `<div class="card pad" style="margin-top:8px"><div class="gstrip">${[0, 1, 2, 3, 4, 5, 6].map(i => { const x = addDays(seg, i); return `<button data-act="gDia" data-d="${x}" aria-pressed="${x === d}" class="${x === S.hoje ? 'hj' : ''}">${DIAS_CURTO[i]}<small>${x.slice(8)}</small></button>`; }).join('')}</div>
-    <div class="nav" style="margin-top:10px"><button data-act="gPrev" aria-label="Dia anterior">‹</button><div><b class="num">${DIAS[wd(d)]}, ${br(d)}</b><small>${d === S.hoje ? 'hoje · ' : ''}${nFeitas} feita${nFeitas === 1 ? '' : 's'}${nNao ? ` · ${nNao} não feita${nNao === 1 ? '' : 's'}` : ''}</small></div><button data-act="gNext" aria-label="Próximo dia">›</button></div>
+    <div class="nav" style="margin-top:10px"><button data-act="gPrev" aria-label="Dia anterior">‹</button><div><b class="num">${DIAS[wd(d)]}, ${br(d)}</b><small>${d === S.hoje ? 'hoje · ' : ''}${nFeitas} feita${nFeitas === 1 ? '' : 's'}${nNao ? ` · ${nNao} não feita${nNao === 1 ? '' : 's'}` : ''}${nPend ? ` · ${nPend} pendente${nPend === 1 ? '' : 's'}` : ''}</small></div><button data-act="gNext" aria-label="Próximo dia">›</button></div>
     <div class="btns" style="margin-top:8px"><button class="btn sm" data-act="gHoje">Hoje</button><input type="date" id="gSalta" value="${d}" aria-label="Ir para a data" style="max-width:170px"></div></div>`;
   if (d < desde) h += `<div class="note acc" style="margin-top:8px">Este dia é anterior ao início da grade (${br(desde)}). Ele vale pelo texto colado. Você pode mudar a data de início lá embaixo.</div>`;
+  { const pg = pendenciasGrade(ativos(), g, S.hoje); if (pg.length) h = `<div class="aviso-g" style="margin-top:8px"><b>Dias com aulas em amarelo</b><div class="chips" style="margin-top:6px">${pg.slice(0, 14).map(x => `<button class="chip bad" data-act="gDia" data-d="${x.d}">${brShort(x.d)} · ${x.n}</button>`).join('')}${pg.length > 14 ? `<span class="chip">+${pg.length - 14}</span>` : ''}</div></div>` + h; }
   h += `<h2>Aulas do dia</h2><div class="card pad">`;
-  h += itens.length ? itens.map(i => `<button class="gchip ${fora.has(i.k) ? 'nao' : 'ok'}" data-act="gTog" data-k="${esc(i.k)}" aria-pressed="${fora.has(i.k)}"><span class="nm">${i.h ? `<small>${esc(i.h)}</small>` : ''}${esc(nomeChip(i.c, i.mb))}</span><span>${fora.has(i.k) ? 'Não fez' : 'Feita'}</span></button>`).join('') : '<p class="muted" style="margin:0">Ninguém tem aula na grade neste dia.</p>';
+  h += itens.length ? `<small style="display:block">Amarelo = ainda não confirmado. Toque: verde (feita) → vermelho (não fez) → amarelo. Só conta depois que o dia inteiro estiver confirmado.</small>` + itens.map(i => { const st = est(i.k), cls = st === 'ok' ? 'ok' : st === 'fora' ? 'nao' : 'pend', tx = st === 'ok' ? 'Feita' : st === 'fora' ? 'Não fez' : 'Pendente'; return `<button class="gchip ${cls}" data-act="gTog" data-k="${esc(i.k)}" aria-label="${esc(nomeChip(i.c, i.mb))}: ${tx}. Toque para mudar"><span class="nm">${i.h ? `<small>${esc(i.h)}</small>` : ''}${esc(nomeChip(i.c, i.mb))}</span><span>${tx}</span></button>`; }).join('') + (nPend ? `<div class="btns" style="margin-top:10px"><button class="btn sm" data-act="gOkDia" data-d="${d}">Marcar os ${nPend} pendente${nPend === 1 ? '' : 's'} como feitos</button></div>` : '') : '<p class="muted" style="margin:0">Ninguém tem aula na grade neste dia.</p>';
   h += extras.map(k => { const m = membroDeChave(k); return `<div class="gchip ok"><span class="nm"><small>extra</small>${esc(m.c ? nomeChip(m.c, m.mb || { nome: m.nome }) : k)}</span><button class="btn sm" data-act="gExtraRm" data-k="${esc(k)}" aria-label="Tirar aula extra">×</button></div>`; }).join('');
   h += `<div class="addrow" style="margin-top:14px"><select id="gExtraSel" aria-label="Aluno da aula extra"><option value="">Aula extra: escolha o aluno…</option>${ativos().flatMap(c => c.membros.map(mb => `<option value="${esc(chaveM(c.id, mb.nome))}">${esc(c.membros.length > 1 ? c.nome + ' · ' + mb.nome : c.nome)}</option>`)).join('')}</select><button class="btn sm pri" data-act="gExtraAdd">+ Aula extra</button></div></div>`;
   // Velocity
@@ -1005,9 +1042,10 @@ function gradeDiferencas(blocos) {
   const g = S.grade; if (!gradeAtiva(g)) return [];
   const contasG = ativos(), ids = new Set(contasG.flatMap(c => c.membros.map(mb => chaveM(c.id, mb.nome)))), out = [];
   for (const b of blocos) for (const d of eachDay(b.ini < g.meta.desde ? g.meta.desde : b.ini, b.fim)) {
-    const G = feitosDoDia(contasG, g, d), T = new Set(b.aulas.filter(a => a.d === d && !a.falta).map(a => chaveM(a.c, a.m)).filter(k => ids.has(k)));
-    for (const k of G) if (!T.has(k)) out.push({ d, k, tipo: 'soGrade', esc: 'texto' });
-    for (const k of T) if (!G.has(k)) out.push({ d, k, tipo: 'soTexto', esc: 'texto' });
+    const P = planejadosDoDia(contasG, g, d), ex = new Set(((g.dias || {})[d] || {}).extras || []), T = new Set(b.aulas.filter(a => a.d === d && !a.falta).map(a => chaveM(a.c, a.m)).filter(k => ids.has(k)));
+    for (const k of P) { const st = estadoK(g, d, k); if (st === 'ok' && !T.has(k)) out.push({ d, k, tipo: 'soGrade', gr: 'feita', esc: 'texto' }); else if (st === 'fora' && T.has(k)) out.push({ d, k, tipo: 'soTexto', gr: 'não fez', esc: 'texto' }); }
+    for (const k of ex) if (!T.has(k)) out.push({ d, k, tipo: 'soGrade', gr: 'aula extra', esc: 'texto' });
+    for (const k of T) if (!P.includes(k) && !ex.has(k)) out.push({ d, k, tipo: 'soTexto', gr: 'sem aula', esc: 'texto' });
   }
   return out.sort((a, b) => a.d.localeCompare(b.d));
 }
@@ -1016,7 +1054,7 @@ function vDifs() {
   return `<div class="in"><div class="hd"><h3>Diferenças com a grade</h3><button class="btn sm" data-act="sheetFechar">Cancelar</button></div><div class="stack">
   <p class="muted" style="margin:0">O texto colado não bate com a grade marcada. Escolha qual vale em cada caso. Nada é salvo antes de você confirmar.</p>
   <div class="btns"><button class="btn sm" data-act="difTodos" data-v="texto">Texto vale em todos</button><button class="btn sm" data-act="difTodos" data-v="grade">Grade vale em todos</button></div>
-  <div class="card">${L.map((x, i) => { const m = membroDeChave(x.k), nome = m.c ? nomeChip(m.c, m.mb || { nome: m.nome }) : x.k; return `<div class="row" style="flex-wrap:wrap;gap:8px"><div class="main"><b>${dtxt(x.d)} · ${esc(nome)}</b><small>${x.tipo === 'soGrade' ? 'Grade: feita · Texto: não aparece' : 'Texto: feita · Grade: não aparece'}</small></div><button class="btn sm ${x.esc === 'texto' ? 'pri' : ''}" data-act="difEsc" data-i="${i}" data-v="texto">Usar texto</button><button class="btn sm ${x.esc === 'grade' ? 'pri' : ''}" data-act="difEsc" data-i="${i}" data-v="grade">Manter grade</button></div>`; }).join('')}</div>
+  <div class="card">${L.map((x, i) => { const m = membroDeChave(x.k), nome = m.c ? nomeChip(m.c, m.mb || { nome: m.nome }) : x.k; return `<div class="row" style="flex-wrap:wrap;gap:8px"><div class="main"><b>${dtxt(x.d)} · ${esc(nome)}</b><small>Grade: ${esc(x.gr || (x.tipo === 'soGrade' ? 'feita' : 'sem aula'))} · Texto: ${x.tipo === 'soGrade' ? 'não aparece' : 'feita'}</small></div><button class="btn sm ${x.esc === 'texto' ? 'pri' : ''}" data-act="difEsc" data-i="${i}" data-v="texto">Usar texto</button><button class="btn sm ${x.esc === 'grade' ? 'pri' : ''}" data-act="difEsc" data-i="${i}" data-v="grade">Manter grade</button></div>`; }).join('')}</div>
   <div class="btns"><button class="btn pri" data-act="difOk">Confirmar e salvar a semana</button></div></div></div>`;
 }
 async function salvarSemanas() {
@@ -1031,8 +1069,9 @@ async function aplicarDifs() {
   for (const ym of Object.keys(porMes)) await gravarMes(ym, dias => {
     for (const x of porMes[ym]) {
       const e = dias[x.d] = dias[x.d] || {}, m = membroDeChave(x.k);
-      if (x.tipo === 'soGrade') { addSet(e, 'fora', x.k); rmSet(e, 'extras', x.k); }
-      else if (m.c && m.mb && planejado(m.c, m.mb, x.d, S.grade)) rmSet(e, 'fora', x.k); else addSet(e, 'extras', x.k);
+      const plan = m.c && m.mb && planejado(m.c, m.mb, x.d, S.grade);
+      if (x.tipo === 'soGrade') { if (plan) { rmSet(e, 'ok', x.k); addSet(e, 'fora', x.k); } else rmSet(e, 'extras', x.k); }
+      else if (plan) { rmSet(e, 'fora', x.k); addSet(e, 'ok', x.k); } else addSet(e, 'extras', x.k);
     }
   });
 }
@@ -1779,11 +1818,14 @@ document.addEventListener('click', async ev => {
       case 'gPrev': S.gDia = addDays(S.gDia || S.hoje, -1); render(); break;
       case 'gNext': S.gDia = addDays(S.gDia || S.hoje, 1); render(); break;
       case 'gHoje': S.gDia = S.hoje; render(); break;
-      case 'gTog': { const dia = S.gDia || S.hoje; await gravarDia(dia, e => { if ((e.fora || []).includes(d.k)) rmSet(e, 'fora', d.k); else addSet(e, 'fora', d.k); }); break; }
+      case 'gTog': { const dia = S.gDia || S.hoje, st = estadoK(S.grade, dia, d.k); await gravarDia(dia, e => { if (st === 'pend') addSet(e, 'ok', d.k); else if (st === 'ok') { rmSet(e, 'ok', d.k); addSet(e, 'fora', d.k); } else rmSet(e, 'fora', d.k); }); break; }
+      case 'gOkDia': { const dia = d.d || S.gDia || S.hoje, ks = planejadosDoDia(ativos(), S.grade, dia).filter(k => estadoK(S.grade, dia, k) === 'pend'); if (ks.length) await gravarDia(dia, e => ks.forEach(k => addSet(e, 'ok', k))); if (d.d && $('#sheet') && !$('#sheet').hidden) abrirSheet(vAvisoGrade()); break; }
+      case 'gPend': { const pg = pendenciasGrade(ativos(), S.grade, S.hoje); fecharSheet(); S.tab = 'semana'; S.semModo = 'grade'; if (pg.length) S.gDia = pg[0].d; render(true); window.scrollTo(0, 0); break; }
+      case 'gAbrirDia': fecharSheet(); S.tab = 'semana'; S.semModo = 'grade'; S.gDia = d.d; render(true); window.scrollTo(0, 0); break;
       case 'gExtraAdd': {
         const k = ($('#gExtraSel') || {}).value; if (!k) { toast('Escolha o aluno da aula extra'); break; }
         const dia = S.gDia || S.hoje, m = membroDeChave(k), e0 = S.grade.dias[dia] || {};
-        if (m.c && m.mb && planejado(m.c, m.mb, dia, S.grade)) { if ((e0.fora || []).includes(k)) { await gravarDia(dia, e => rmSet(e, 'fora', k)); toast('Este aluno já tem aula na grade: voltou para feita'); } else toast('Este aluno já tem aula na grade neste dia'); break; }
+        if (m.c && m.mb && planejado(m.c, m.mb, dia, S.grade)) { { await gravarDia(dia, e => { rmSet(e, 'fora', k); addSet(e, 'ok', k); }); toast('Este aluno já tem aula na grade: marcado como feita'); } break; }
         await gravarDia(dia, e => addSet(e, 'extras', k)); break;
       }
       case 'gExtraRm': await gravarDia(S.gDia || S.hoje, e => rmSet(e, 'extras', d.k)); break;
@@ -2074,7 +2116,7 @@ const ICONES = {
 };
 const ROTULOS = { inicio: 'Início', semana: 'Semana', rel: 'Relatórios', arquivo: 'Arquivo', alunos: 'Alunos', salario: 'Salário', config: 'Config.' };
 function renderChrome() {
-  $('#tabs').innerHTML = '<div>' + Object.keys(ROTULOS).map(k => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONES[k]}</svg>${ROTULOS[k]}</button>`).join('') + '</div>';
+  $('#tabs').innerHTML = '<div>' + Object.keys(ROTULOS).map(k => `<button data-tab="${k}" ${S.tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ICONES[k]}</svg>${ROTULOS[k]}${k === 'semana' && pendGradeN() ? `<span class="bdg" aria-label="${pendGradeN()} dia(s) pendente(s)">${pendGradeN()}</span>` : ''}</button>`).join('') + '</div>';
   const olhoAberto = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>', olhoFechado = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6C3.7 8.4 2 12 2 12s3.6 7 10 7c1.7 0 3.2-.4 4.5-1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
   document.body.classList.toggle('oculta', !!S.ocultar);
   $('#hoje').innerHTML = `<span class="synctxt"><span class="sync ${S.sync ? '' : 'off'}"></span>${S.sync ? 'Sincronizado' : 'Sem conexão'}</span><button class="btn sm olho" data-act="ocultar" aria-label="${S.ocultar ? 'Mostrar valores' : 'Ocultar valores'}" title="${S.ocultar ? 'Mostrar valores' : 'Ocultar valores'}">${S.ocultar ? olhoFechado : olhoAberto}</button><button class="btn sm dng sair" data-act="sair" aria-label="Sair da conta">Sair</button>`;
@@ -2094,7 +2136,7 @@ function render(forte) {
   if (S.sheet && S.sheet.conta && !$('#sheet')?.hidden) { /* folha aberta não é redesenhada por dados externos */ }
 }
 document.addEventListener('toggle', e => { const t = e.target; if (t && t.classList && t.classList.contains('imp')) S.impAberto = t.open; if (t && t.classList && t.classList.contains('arq') && t.dataset.k) { S.arqOpen = S.arqOpen || new Set(); if (t.open) S.arqOpen.add(t.dataset.k); else S.arqOpen.delete(t.dataset.k); } }, true);
-function onData() { if (pend) return; pend = true; requestAnimationFrame(() => { pend = false; render(); }); }
+function onData() { if (pend) return; pend = true; requestAnimationFrame(() => { pend = false; render(); checarAvisoGrade(); }); }
 // ---------- bloqueio com Face ID / digital (passkey neste aparelho) ----------
 const Lock = (() => {
   const KEY = 'fmgsa:lock:' + (TESTE ? 't' : 'r');
